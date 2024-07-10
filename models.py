@@ -384,16 +384,18 @@ class LADIES_Mini_Batch_ERGCN(nn.Module):  # ergcn - rgcn with node embeddings
         self.bias1 = nn.Parameter(torch.FloatTensor(embed_size).zero_())
         self.bias2 = nn.Parameter(torch.FloatTensor(num_classes).zero_())
 
-    def forward(self, X_batch, after_nodes_list, nodes_needed, A_en_sliced, A, test_state,
+    def forward(self, X_batch, A_en_sliced, test_state,
                 idx_per_rel_list=None, nonzero_rel_list=None):
+        one_adjacency = not(type(A_en_sliced) == list)
         if test_state == 'LDRN' or test_state == 'full-mini' or (self.training and (self.sampler == 'LDRN'
                                                                 or self.sampler == 'LDUN'
                                                                 or self.sampler == 'LDRE'
                                                                 or self.sampler == 'IARN'
                                                                 or self.sampler == 'IDRN'
+                                                                or (self.sampler == 'grapes' and not one_adjacency)
                                                                 or self.sampler == 'full-mini-batch')):
-            dp2neighbours_idx = after_nodes_list[0]
-            dp1neighbours_idx = after_nodes_list[1]
+            # dp2neighbours_idx = after_nodes_list[0]
+            # dp1neighbours_idx = after_nodes_list[1]
 
             A_0 = A_en_sliced[0]
             A_1 = A_en_sliced[1]
@@ -402,19 +404,19 @@ class LADIES_Mini_Batch_ERGCN(nn.Module):  # ergcn - rgcn with node embeddings
             c = self.num_classes
 
             ## Layer 1
-            X_batch_dp2neighbours_idx = [i for i in range(len(nodes_needed))
-                                      if nodes_needed[i] in dp2neighbours_idx]
+            # X_batch_dp2neighbours_idx = [i for i in range(len(nodes_needed))
+            #                           if nodes_needed[i] in dp2neighbours_idx]
 
             if self.bases1 is None:
                 w = self.w1
 
-                xw_dp1 = torch.einsum('ne, re -> rne', X_batch[X_batch_dp2neighbours_idx], w).contiguous()
+                xw_dp1 = torch.einsum('ne, re -> rne', X_batch, w).contiguous()
 
             else:
                 w = torch.einsum('rb, beh -> reh', self.comp1, self.bases1)
-                xw_dp1 = torch.einsum('ne, reh -> rnh', X_batch[X_batch_dp2neighbours_idx].float(), w.float()).contiguous()
+                xw_dp1 = torch.einsum('ne, reh -> rnh', X_batch.float(), w.float()).contiguous()
 
-            h1_dp1 = torch.mm(A_0.float(), (xw_dp1.view(self.num_rels * len(dp2neighbours_idx), e).float()))
+            h1_dp1 = torch.mm(A_0.float(), (xw_dp1.view(self.num_rels * X_batch.size(0), e).float()))
             h1 = F.relu(h1_dp1 + self.bias1)
 
             # Layer 2
@@ -424,15 +426,15 @@ class LADIES_Mini_Batch_ERGCN(nn.Module):  # ergcn - rgcn with node embeddings
                 w = torch.einsum('rb, bho -> rho', self.comp2, self.bases2)
 
             h2 = torch.einsum('nh, rhc -> rnc', h1, w).contiguous()
-            h2 = h2.view(self.num_rels * len(dp1neighbours_idx), c)
+            h2 = h2.view(A_1.size(1), c)
             h2 = torch.mm(A_1.float(), h2.float())
             h2 = h2 + self.bias2
 
             return h2
 
         if test_state == 'LDRN' or test_state == 'full-mini':
-            dp2neighbours_idx = after_nodes_list[0]
-            dp1neighbours_idx = after_nodes_list[1]
+            # dp2neighbours_idx = after_nodes_list[0]
+            # dp1neighbours_idx = after_nodes_list[1]
 
             idx_per_rel_dp2 = idx_per_rel_list[0]
             idx_per_rel_dp1 = idx_per_rel_list[1]
@@ -443,28 +445,28 @@ class LADIES_Mini_Batch_ERGCN(nn.Module):  # ergcn - rgcn with node embeddings
             c = self.num_classes
 
             ## Layer 1
-            X_batch_dp2neighbours_idx = [i for i in range(len(nodes_needed))
-                                      if nodes_needed[i] in dp2neighbours_idx]
+            # X_batch_dp2neighbours_idx = [i for i in range(len(nodes_needed))
+            #                           if nodes_needed[i] in dp2neighbours_idx]
 
             if self.bases1 is None:
                 w = self.w1
-                xw_dp1 = torch.einsum('ne, re -> rne', X_batch[X_batch_dp2neighbours_idx], w).contiguous()
+                xw_dp1 = torch.einsum('ne, re -> rne', X_batch, w).contiguous()
 
             else:
                 w = torch.einsum('rb, beh -> reh', self.comp1, self.bases1)
-                xw_dp1 = torch.einsum('ne, reh -> rnh', X_batch[X_batch_dp2neighbours_idx].float(), w.float()).contiguous()
+                xw_dp1 = torch.einsum('ne, reh -> rnh', X_batch.float(), w.float()).contiguous()
 
             if self.sampler == 'LDRE':
-                xw_dp1_flat = xw_dp1.view(self.num_rels * len(dp2neighbours_idx), e)
+                xw_dp1_flat = xw_dp1.view(self.num_rels * X_batch.shape(0), e)
                 xw_dp1_samp_cat = torch.empty(A_0.size()[1],e)
                 offset = 0
-                for r in range(self.num_rels):
-                    ri = (nonzero_rel_list[-1] == r).nonzero(as_tuple=True)[0]
-                    if len(ri) > 0:
-                        local_idx_in_dp2neigh, _ = (dp2neighbours_idx.unsqueeze(1) == idx_per_rel_dp2[ri]).nonzero(as_tuple=True)
-                        xw_dp1_samp = xw_dp1_flat[r*len(dp2neighbours_idx)+local_idx_in_dp2neigh, :]
-                        xw_dp1_samp_cat[offset:offset+len(idx_per_rel_dp2[ri])] = xw_dp1_samp
-                        offset += len(idx_per_rel_dp2[ri])
+                # for r in range(self.num_rels):
+                #     ri = (nonzero_rel_list[-1] == r).nonzero(as_tuple=True)[0]
+                #     if len(ri) > 0:
+                #         local_idx_in_dp2neigh, _ = (dp2neighbours_idx.unsqueeze(1) == idx_per_rel_dp2[ri]).nonzero(as_tuple=True)
+                #         xw_dp1_samp = xw_dp1_flat[r*len(dp2neighbours_idx)+local_idx_in_dp2neigh, :]
+                #         xw_dp1_samp_cat[offset:offset+len(idx_per_rel_dp2[ri])] = xw_dp1_samp
+                #         offset += len(idx_per_rel_dp2[ri])
                 h1_dp1 = torch.mm(A_0.float(), xw_dp1_samp_cat)
 
             h1 = F.relu(h1_dp1 + self.bias1)
@@ -476,15 +478,15 @@ class LADIES_Mini_Batch_ERGCN(nn.Module):  # ergcn - rgcn with node embeddings
                 w = torch.einsum('rb, bho -> rho', self.comp2, self.bases2)
 
             h2 = torch.einsum('nh, rhc -> rnc', h1, w).contiguous()
-            h2 = h2.view(self.num_rels * len(dp1neighbours_idx), c)
+            h2 = h2.view(self.num_rels * A_1.shape(), c)
             h2 = torch.mm(A_1.float(), h2.float())
             h2 = h2 + self.bias2
 
             return h2
 
-        elif test_state == 'full' and not self.training:
-            n, rn = A.size()
-            num_rels = rn // n
+        elif test_state == 'full' and not self.training or one_adjacency:
+            n1, rn2 = A_en_sliced.size()
+            n2 = rn2 // self.num_rels
             e = self.embed_size
             c = self.num_classes
 
@@ -497,7 +499,7 @@ class LADIES_Mini_Batch_ERGCN(nn.Module):  # ergcn - rgcn with node embeddings
                 xw = torch.einsum('ne, reh -> rnh', X_batch, w).contiguous()
 
             # Apply weights and sum over relations
-            h1 = torch.mm(A, xw.view(num_rels * n, e))
+            h1 = torch.mm(A_en_sliced, xw.view(self.num_rels * n2, e))
             h1 = F.relu(h1 + self.bias1)
 
             # Layer 2
@@ -507,8 +509,8 @@ class LADIES_Mini_Batch_ERGCN(nn.Module):  # ergcn - rgcn with node embeddings
                 w = torch.einsum('rb, bho -> rho', self.comp2, self.bases2)
 
             h2 = torch.einsum('nh, rhc -> rnc', h1, w).contiguous()
-            h2 = h2.view(self.num_rels * n, c)
-            h2 = torch.mm(A, h2)
+            h2 = h2.view(self.num_rels * n1, c)
+            h2 = torch.mm(A_en_sliced, h2)
 
             return h2 + self.bias2
 

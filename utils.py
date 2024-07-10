@@ -10,7 +10,7 @@ import os, pdb
 import torchvision as tv
 from PIL import ImageOps
 import time
-
+from torch.distributions import Bernoulli, Gumbel
 
 def d(tensor=None):
     """
@@ -373,6 +373,7 @@ def adj_with_neighbours(edges, num_nodes, num_rels, cuda=False, vertical=True):
 
     return indices.t(), size
 
+
 def adj_triples(triples, num_nodes, num_rels, cuda=False, vertical=True):
     """
     Computes a sparse adjacency matrix for the given graph (the adjacency matrices of all
@@ -409,6 +410,7 @@ def adj_triples(triples, num_nodes, num_rels, cuda=False, vertical=True):
 
     return indices.t(), size
 
+
 def get_splits(y, train_idx, test_idx, validation=True):
     # Make dataset splits
     # np.random.shuffle(train_idx)
@@ -430,6 +432,154 @@ def get_splits(y, train_idx, test_idx, validation=True):
     y_test[idx_test] = np.array(y[idx_test].todense())
 
     return y_train, y_val, y_test, idx_train, idx_val, idx_test
+
+
+def sampler_func(sampler, batch_id, num_nodes, num_rels, horizontal_en_A_tr, norel_A_tr, A_sep, samp_num_list, depth,
+            model_g, embed_X, device):
+    if sampler == 'full-mini-batch':
+        A_en_sliced, after_nodes_list, rels_more = full_mini_sampler(batch_id, num_nodes,
+                                                                     int((num_rels - 1) / 2),
+                                                                     horizontal_en_A_tr, depth, device)
+        idx_per_rel_list = []
+        nonzero_rel_list = []
+    elif sampler == 'grapes':
+        A_en_sliced, after_nodes_list, idx_per_rel_list, nonzero_rel_list, rels_more, log_probs = grapes_sampler(
+            batch_id,
+            samp_num_list,
+            num_nodes,
+            num_rels,
+            horizontal_en_A_tr,
+            depth,
+            sampler,
+            model_g,
+            embed_X,
+            device)
+    elif sampler == 'LDUN':
+        A_en_sliced, after_nodes_list, idx_per_rel_list, nonzero_rel_list, rels_more = ladies_norel_sampler(batch_id,
+                                                                                                            samp_num_list,
+                                                                                                            num_nodes,
+                                                                                                            num_rels,
+                                                                                                            norel_A_tr,
+                                                                                                            horizontal_en_A_tr,
+                                                                                                            depth,
+                                                                                                            sampler,
+                                                                                                            device)
+        log_probs = 0.
+    elif sampler == "LDRN" or sampler == "LDRE":
+        A_en_sliced, after_nodes_list, idx_per_rel_list, nonzero_rel_list, rels_more = ladies_sampler(batch_id,
+                                                                                                      samp_num_list,
+                                                                                                      num_nodes,
+                                                                                                      num_rels,
+                                                                                                      horizontal_en_A_tr,
+                                                                                                      depth,
+                                                                                                      sampler,
+                                                                                                      device)
+        log_probs = 0.
+    elif sampler == 'hetero':
+        A_en_sliced, after_nodes_list = hetero_sampler(batch_id, samp_num_list, num_nodes,
+                                                       num_rels, A_sep, depth, device)
+        idx_per_rel_list = []
+        nonzero_rel_list = []
+        rels_mode = []
+        log_probs = 0.
+    elif sampler == 'IARN':
+        A_en_sliced, after_nodes_list, rels_more = random_sampler(batch_id, samp_num_list, num_nodes,
+                                                                  num_rels,
+                                                                  horizontal_en_A_tr, depth, device)
+        idx_per_rel_list = []
+        nonzero_rel_list = []
+        log_probs = 0.
+    elif sampler == 'IDRN':
+        A_en_sliced, after_nodes_list, rels_more = fastgcn_plus_sampler(batch_id, samp_num_list, num_nodes,
+                                                                        num_rels,
+                                                                        horizontal_en_A_tr, depth, device)
+        idx_per_rel_list = []
+        nonzero_rel_list = []
+        log_probs = 0.
+    return A_en_sliced, after_nodes_list, idx_per_rel_list, nonzero_rel_list, rels_more, log_probs
+
+
+def adj_r_creator(edges, self_loop_dropout, num_nodes, num_rels):
+    edges_en_tr = enrich_with_drop(edges, self_loop_dropout, num_nodes,
+                                   int((num_rels - 1) / 2))
+    edges_en_ts = enrich_with_drop(edges, 0, num_nodes, int((num_rels - 1) / 2))
+
+    # horizontal indices and sizes
+    hor_en_ind_tr, hor_en_size_tr = adj(edges_en_tr, num_nodes, num_rels, vertical=False)
+    ver_en_ind_tr, ver_en_size_tr = adj(edges_en_tr, num_nodes, num_rels, vertical=True)
+
+    hor_en_ind_ts, hor_en_size_ts = adj(edges_en_ts, num_nodes, num_rels, vertical=False)
+    ver_en_ind_ts, ver_en_size_ts = adj(edges_en_ts, num_nodes, num_rels, vertical=True)
+
+    vals_en_tr = torch.ones(ver_en_ind_tr.size(0), dtype=torch.float)
+    vals_en_tr = vals_en_tr / sum_sparse(ver_en_ind_tr, vals_en_tr, ver_en_size_tr, True)
+
+    vals_en_ts = torch.ones(ver_en_ind_ts.size(0), dtype=torch.float)
+    vals_en_ts = vals_en_ts / sum_sparse(ver_en_ind_ts, vals_en_ts, ver_en_size_ts, True)
+
+    # constructing the horizontal and vertical Adj matrices
+    hor_en_adj_tr = torch.sparse.FloatTensor(indices=hor_en_ind_tr.t(), values=vals_en_tr, size=hor_en_size_tr)
+    hor_en_adj_ts = torch.sparse.FloatTensor(indices=hor_en_ind_ts.t(), values=vals_en_ts, size=hor_en_size_ts)
+
+    return hor_en_adj_tr, hor_en_adj_ts
+
+
+def sample_neighborhoods_from_probs(logits, A, num_samples, num_rels):
+    """Remove edges from an edge index, by removing nodes according to some
+    probability.
+
+    Uses Gumbel-max trick to sample from Bernoulli distribution. This is off-policy, since the original input
+    distribution is a regular Bernoulli distribution.
+    Args:
+        logits: tensor of shape (N,), where N all the number of unique
+            nodes in a batch, containing the probability of dropping the node.
+        neighbor_nodes: tensor containing global node identifiers of the neighbors nodes
+        num_samples: the number of samples to keep. If None, all edges are kept.
+    """
+
+    k = num_samples
+    n = A.shape[1] // (2*num_rels+1)
+    if k >= n:
+        logprobs = torch.nn.functional.logsigmoid(logits.squeeze(-1))
+        return A, logprobs, {}
+    assert k < n
+    assert k > 0
+
+    b = Bernoulli(logits=logits.squeeze())
+
+    # Gumbel-sort trick https://timvieira.github.io/blog/post/2014/08/01/gumbel-max-trick-and-weighted-reservoir-sampling/
+    gumbel = Gumbel(torch.tensor(0., device=logits.device), torch.tensor(1., device=logits.device))
+    gumbel_noise = gumbel.sample((n,))
+    perturbed_log_probs = b.probs.log() + gumbel_noise
+
+    samples = torch.topk(perturbed_log_probs, k=k, dim=0, sorted=False)[1]
+
+    # calculate the entropy in bits
+    entropy = -(b.probs * (b.probs).log2() + (1 - b.probs) * (1 - b.probs).log2())
+
+    min_prob = b.probs.min(-1)[0]
+    max_prob = b.probs.max(-1)[0]
+
+    if torch.isnan(entropy).any():
+        nan_ind = torch.isnan(entropy)
+        entropy[nan_ind] = 0.0
+
+    std_entropy, mean_entropy = torch.std_mean(entropy)
+    mask = torch.zeros_like(logits.squeeze(), dtype=torch.float)
+    mask[samples] = 1
+
+    # neighbor_nodes = neighbor_nodes[mask.bool().cpu()]
+
+    stats_dict = {"min_prob": min_prob,
+                  "max_prob": max_prob,
+                  "mean_entropy": mean_entropy,
+                  "std_entropy": std_entropy}
+
+    if torch.isinf(b.log_prob(mask)).any():
+        inf_ind = torch.isinf(b.log_prob(mask))
+        b.log_prob(mask)[inf_ind] = -1e-9
+
+    return samples, b.log_prob(mask), stats_dict
 
 
 def random_sampler_layerwise(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, device):
@@ -526,9 +676,57 @@ def fastgcn_plus_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, de
     return A_en_sliced, after_nodes_list, 0
 
 
-def grapes_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, sampler, device):
+def grapes_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, sampler, model_g, embed_X, device):
+    previous_nodes = batch_idx
+    after_nodes = torch.arange(num_nodes)
+    col_ind = []
+    A_en_sliced = []
+    after_nodes_list = []
+    idx_per_rel_list = []
+    non_zero_rel_list = []
+    log_probs = []
 
-    return A_en_sliced, after_nodes_list, idx_per_rel_list, non_zero_rel_list, rels_more
+    for d in range(depth):
+        neighbors = get_neighbours_sparse(A_en, previous_nodes)
+        cols = getAdjacencyNodeColumnIdx(previous_nodes, num_nodes, 2*num_rels+1)
+        A_gf = slice_adj_row_col(A_en, neighbors, cols, len(neighbors), len(previous_nodes), 'prob')
+        # calculate the importance of each neighbor
+        node_logits, _ = model_g(embed_X, A_gf, neighbors, [], [], device)
+        num_prev_nodes = len(previous_nodes)
+        # calculate the probability of sampling each neighbor in each relation
+        # output the relations that appear in at least one neighbor
+
+        s_num = samp_num_list[d]
+        if s_num > 0:
+            idx_local, log_prob, statistics = sample_neighborhoods_from_probs(
+                node_logits,
+                A_gf,
+                s_num,
+            num_rels)
+            log_probs.append(log_prob)
+            # sample nodes given their probablity.
+            # output the local and global idx of the neighbors, the probability of the nodes sampled
+            # idx_local, nonzero_rels, global_idx, prob, rels_more = sel_idx_node(p, s_num, num_nodes, num_rels)
+            idx_list_per_rel = []
+
+            after_nodes = idx_local  # unique node idx
+        else:
+            after_nodes = batch_idx
+        # unique node idx with aggregation
+        after_nodes = torch.unique(torch.cat((after_nodes, previous_nodes.to('cpu'))))
+        cols = getAdjacencyNodeColumnIdx(after_nodes, num_nodes, 2*num_rels+1)
+        col_ind.append(cols)
+        # sample A
+        A_en_sliced.append(slice_adj_row_col(A_en, previous_nodes, cols, num_prev_nodes, len(after_nodes), 'cl'))
+        previous_nodes = after_nodes
+        after_nodes_list.append(after_nodes)
+        idx_list_per_rel_dev = [i.to(device) for i in idx_list_per_rel]
+        idx_per_rel_list.append(idx_list_per_rel_dev)
+        # non_zero_rel_list.append(nonzero_rels)
+    A_en_sliced.reverse()
+    after_nodes_list.reverse()
+    idx_per_rel_list.reverse()
+    return A_en_sliced, after_nodes_list, idx_per_rel_list, non_zero_rel_list, 0, log_probs
 
 
 def ladies_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, sampler, device):
@@ -822,42 +1020,43 @@ def sel_idx_per_rel(pp, s_num, num_nodes, num_rels):
     return total_idx
 
 
-def slice_adj_row_col(A, row_ind, col_ind, num_rels, num_prev_nodes, num_after_nodes):
+def slice_adj_row_col(A, row_ind, col_ind, num_prev_nodes, num_after_nodes, mode):
     n, rn = A.size()
     r = rn // n
-    # row_ind_set = set(row_ind[-1].tolist()) #row_ind[-1] #
-    # col_ind_set = set(col_ind[-1].tolist()) #col_ind[-1] #
-    # row_isin2 = torch.tensor([(id.item() in row_ind_set) for id in A._indices()[0]])
-    row_isin = torch.isin(A._indices()[0], row_ind[-1].to(A.device))
-    start = time.time()
-    col_isin = torch.isin(A._indices()[1], col_ind[-1].to(A.device))
-
-    # col_isin2 = torch.tensor([(id.item() in col_ind_set) for id in A._indices()[1]])
-    # diff_row = torch.eq(row_isin2, row_isin).sum()
-    # assert diff_row == len(row_isin)
-    # diff_col = torch.eq(col_isin, col_isin2).sum()
-    # assert diff_col == len(col_isin)
-    print(f'cols isin ({time.time() - start:.4}s).')
+    row_isin = torch.isin(A._indices()[0], row_ind)
+    col_isin = torch.isin(A._indices()[1], col_ind)
     # row, col = A._indices()[:, torch.where(torch.isin(A._indices()[0], idx))[0]] #use to work!
     row_and_col = torch.logical_and(col_isin, row_isin)
     row, col = A._indices()[:, torch.where(row_and_col)[0]]
-    row_ind_set = row_ind[-1].to(A.device)
-    col_ind_set = col_ind[-1].to(A.device)
-    row_index_map = {int(j): i for i, j in enumerate(row_ind_set)}
-    start = time.time()
-    col_index_map = {int(j): i for i, j in enumerate(col_ind_set)}
-    print(f'map cols ({time.time() - start:.4}s).')
-    row = torch.LongTensor([row_index_map[int(i)] for i in row])
-    col = torch.LongTensor([col_index_map[int(i)] for i in col])
-    indices = torch.vstack([row, col])
-    size = [num_prev_nodes, num_after_nodes * r]
+    if mode == 'prob':
+        # add self-loops to make A_r square
+        self_loops = torch.unique(row)
+        self_loops_r = self_loops + r * n
+        row = torch.cat((row[0:-1], self_loops))
+        col = torch.cat((col[0:-1], self_loops_r))
+        col_ind = torch.unique(torch.cat((col, col_ind)))
+        # size is now square because we added the self-loops
+        col_size = num_prev_nodes
+    else:
+        col_size = num_after_nodes
 
+    row_mx = torch.max(row_ind) + 1
+    map = torch.empty((int(row_mx),), dtype=torch.long)
+    map1 = map.scatter_(0, row_ind, torch.arange(len(row_ind)))
+    row = torch.gather(map1, 0, row)
+    col_mx = torch.max(col_ind) + 1
+    map = torch.empty((int(col_mx),), dtype=torch.long)
+    map1 = map.scatter_(0, col_ind, torch.arange(len(col_ind)))
+    col = torch.gather(map1, 0, col)
+
+    indices = torch.vstack([row, col])
+    size = [num_prev_nodes, col_size * r]
     vals = torch.ones(len(row))
     values = torch.sparse.FloatTensor(indices, vals, torch.Size(size))
-    ones = torch.ones(num_rels, num_after_nodes, 1)
+    ones = torch.ones(r, col_size, 1)
     block_mat = torch.block_diag(*ones)
     sums = torch.squeeze(torch.spmm(values, block_mat))
-    sums_a = sums[indices[0], torch.div(indices[1], num_after_nodes, rounding_mode='floor')]
+    sums_a = sums[indices[0], torch.div(indices[1], col_size, rounding_mode='floor')]
     vals_norm = torch.div(vals, sums_a)
 
     return torch.sparse_coo_tensor(indices, vals_norm, size)
