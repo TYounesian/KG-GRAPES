@@ -438,10 +438,10 @@ def sampler_func(sampler, batch_id, num_nodes, num_rels, horizontal_en_A_tr, nor
             model_g, embed_X, device):
     if sampler == 'full-mini-batch':
         A_en_sliced, after_nodes_list, rels_more = full_mini_sampler(batch_id, num_nodes,
-                                                                     int((num_rels - 1) / 2),
-                                                                     horizontal_en_A_tr, depth, device)
+                                                                     num_rels, horizontal_en_A_tr, depth, device)
         idx_per_rel_list = []
         nonzero_rel_list = []
+        log_probs = 0
     elif sampler == 'grapes':
         A_en_sliced, after_nodes_list, idx_per_rel_list, nonzero_rel_list, rels_more, log_probs = grapes_sampler(
             batch_id,
@@ -552,7 +552,7 @@ def sample_neighborhoods_from_probs(logits, A, num_samples, num_rels):
     gumbel_noise = gumbel.sample((n,))
     perturbed_log_probs = b.probs.log() + gumbel_noise
 
-    samples = torch.topk(perturbed_log_probs, k=k, dim=0, sorted=False)[1]
+    samples = torch.topk(perturbed_log_probs, k=k, dim=0, sorted=False)[1].to('cpu')
 
     # calculate the entropy in bits
     entropy = -(b.probs * (b.probs).log2() + (1 - b.probs) * (1 - b.probs).log2())
@@ -691,7 +691,7 @@ def grapes_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, s
         cols = getAdjacencyNodeColumnIdx(previous_nodes, num_nodes, 2*num_rels+1)
         A_gf = slice_adj_row_col(A_en, neighbors, cols, len(neighbors), len(previous_nodes), 'prob')
         # calculate the importance of each neighbor
-        node_logits, _ = model_g(embed_X, A_gf, neighbors, [], [], device)
+        node_logits, _ = model_g(embed_X, A_gf.to(device), neighbors, [], [], device)
         num_prev_nodes = len(previous_nodes)
         # calculate the probability of sampling each neighbor in each relation
         # output the relations that appear in at least one neighbor
@@ -717,7 +717,7 @@ def grapes_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, s
         cols = getAdjacencyNodeColumnIdx(after_nodes, num_nodes, 2*num_rels+1)
         col_ind.append(cols)
         # sample A
-        A_en_sliced.append(slice_adj_row_col(A_en, previous_nodes, cols, num_prev_nodes, len(after_nodes), 'cl'))
+        A_en_sliced.append(slice_adj_row_col(A_en, previous_nodes, cols, num_prev_nodes, len(after_nodes), 'cl').to(device))
         previous_nodes = after_nodes
         after_nodes_list.append(after_nodes)
         idx_list_per_rel_dev = [i.to(device) for i in idx_list_per_rel]

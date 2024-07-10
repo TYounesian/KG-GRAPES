@@ -103,8 +103,11 @@ def go(project="test", name='amplus50', data_name='amplus', batch_size=2048, fea
             if sampler == 'grapes':
                 log_z = torch.tensor(log_z_init, requires_grad=True)
                 optimizer_g = torch.optim.Adam(list(model_g.parameters()) + [log_z], lr=lr_g, weight_decay=0)
+            else:
+                log_z = 0.
         else:
             optimizer_c = torch.optim.Adam(model_c.parameters(), lr=lr_c, weight_decay=0)
+
 
         # training
         print('start training!')
@@ -178,16 +181,18 @@ def go(project="test", name='amplus50', data_name='amplus', batch_size=2048, fea
 
                     batch_loss_train.backward()
                     optimizer_c.step()
+                    if sampler == 'grapes':
+                        optimizer_g.zero_grad()
+                        cost_gfn = batch_loss_train.detach()
+                        tot_log_prob = torch.sum(torch.cat(log_probs, dim=0))
+                        # Trajectory Balance loss
+                        loss_g = (log_z + tot_log_prob + loss_coef * cost_gfn) ** 2
 
-                    optimizer_g.zero_grad()
-                    cost_gfn = batch_loss_train.detach()
-                    tot_log_prob = torch.sum(torch.cat(log_probs, dim=0))
-                    # Trajectory Balance loss
-                    loss_g = (log_z + tot_log_prob + loss_coef * cost_gfn) ** 2
-
-                    loss_g.backward()
-                    optimizer_g.step()
-                    batch_loss_g = loss_g.item()
+                        loss_g.backward()
+                        optimizer_g.step()
+                        batch_loss_g = loss_g.item()
+                    else:
+                        batch_loss_g = 0.
 
                     loss_c += batch_loss_train
                     loss_g += batch_loss_g
@@ -258,7 +263,7 @@ def go(project="test", name='amplus50', data_name='amplus', batch_size=2048, fea
                         acc += batch_acc_test
 
                 elif test_state == 'full' and testing:
-                    out, _ = model_c(embed_X, adj_ts, [], [], [], device=device)
+                    out, _ = model_c(embed_X, adj_ts.to(device), [], [], [], device=device)
                     out_test = out[test_idx, :]
 
                     loss_test = criterion(out_test, y_test)

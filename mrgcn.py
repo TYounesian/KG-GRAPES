@@ -34,6 +34,7 @@ class MRGCN_Batch(nn.Module):
             em_X = embed_X[after_nodes]
 
         em_X_dev = None if em_X is None else em_X.to(device)
+        # A_en_sliced = [i.to(device) for i in A_en_sliced]
 
         self.batch_rgcn.to(device)
 
