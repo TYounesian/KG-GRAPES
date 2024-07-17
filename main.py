@@ -21,8 +21,9 @@ from utils import *
 
 
 def go(project="test", name='amplus50', data_name='amplus', batch_size=2048, feat_size=16, num_epochs=50, modality='no',
-       l2=5e-4, lr_c=0.01, lr_d=0, lr_g=0.01, loss_coef=1e4, log_z_init=0., prune=True, final=True, embed_size=16, bases=40, sampler='LDRN', depth=2, samp0=2048,
-       self_loop_dropout=0, test_state='full', testing=True, saving=False, repeat=5, lr_embed=0, log_wandb=False):
+       l2=5e-4, lr_c=0.01, lr_d=0, lr_g=0.01, loss_coef=1e4, log_z_init=0., use_indicators=True, prune=True, final=True,
+       embed_size=16, bases=40, sampler='LDRN', depth=2, samp0=2048, self_loop_dropout=0, test_state='full',
+       testing=True, saving=False, repeat=5, lr_embed=0, log_wandb=False):
 
     config = {
         "project": project, "name": name, "data_name": data_name, "batch_size": batch_size, "feat_size": feat_size,
@@ -58,6 +59,11 @@ def go(project="test", name='amplus50', data_name='amplus', batch_size=2048, fea
     y_train = y_train.to(device)
     y_test = y_test.to(device)
 
+    if use_indicators:
+        num_indicators = depth + 1
+    else:
+        num_indicators = 0
+
     num_train = len(y_train)
     num_test = len(y_test)
     train_num_batches = max(math.ceil(num_train / batch_size), 1)
@@ -84,8 +90,8 @@ def go(project="test", name='amplus50', data_name='amplus', batch_size=2048, fea
                                 modality=modality,
                                 num_classes=data.num_classes, num_rels=2 * num_rels + 1, num_bases=bases, sampler=sampler,
                                 depth=depth)
-            if sampler=='grapes':
-                model_g = MRGCN_Batch(n=data.num_entities, feat_size=feat_size,
+            if sampler == 'grapes':
+                model_g = MRGCN_Batch(n=data.num_entities, feat_size=feat_size+num_indicators,
                                            embed_size=embed_size, modality=modality, num_classes=1,
                                            num_rels=2 * num_rels + 1, num_bases=bases, sampler=sampler, depth=depth)
 
@@ -111,6 +117,7 @@ def go(project="test", name='amplus50', data_name='amplus', batch_size=2048, fea
 
         # training
         adj_tr, adj_ts = adj_r_creator(data.triples, self_loop_dropout, data.num_entities, 2 * num_rels + 1)
+        indicator_features = torch.zeros((data.num_entities, num_indicators))
         print('start training!')
         for epoch in range(0, num_epochs):
             loss_c = 0
@@ -132,6 +139,8 @@ def go(project="test", name='amplus50', data_name='amplus', batch_size=2048, fea
 
                     batch_node_idx_s, id_sorted = batch_node_idx.sort()
                     batch_y_train_s = batch_y_train[id_sorted]
+                    indicator_features.zero_()
+                    indicator_features[batch_node_idx_s, -1] = 1.0
                     adj_tr_sliced, after_nodes_list, idx_per_rel_list, nonzero_rel_list, rels_more, log_probs = sampler_func(sampler,
                                                                                                            batch_node_idx,
                                                                                                            data.num_entities,
@@ -141,8 +150,9 @@ def go(project="test", name='amplus50', data_name='amplus', batch_size=2048, fea
                                                                                                            [],
                                                                                                            samp_num_list,
                                                                                                            depth,
-                                                                                                           model_c,
+                                                                                                           model_g,
                                                                                                            embed_X,
+                                                                                                           indicator_features,
                                                                                                            device)
                     nodes_needed = [i for j in after_nodes_list for i in j]
                     nodes_needed = torch.unique(torch.tensor(nodes_needed, dtype=torch.int64, device=device))
@@ -193,6 +203,15 @@ def go(project="test", name='amplus50', data_name='amplus', batch_size=2048, fea
                         batch_loss_g = loss_g.item()
                     else:
                         batch_loss_g = 0.
+                        tot_log_prob = 0.
+
+                    log_dict = {'epoch': epoch,
+                                'train_batch_loss_c': batch_loss_train,
+                                'train_batch_loss_g': batch_loss_g,
+                                'log_z': log_z,
+                                'log_probs': tot_log_prob,
+                                'diff': loss_coef * cost_gfn + tot_log_prob}
+                    wandb.log(log_dict)
 
                     loss_c += batch_loss_train
                     loss_g += batch_loss_g
@@ -219,8 +238,6 @@ def go(project="test", name='amplus50', data_name='amplus', batch_size=2048, fea
                                 'train_epoch_loss_c': epoch_tr_loss_c,
                                 'train_epoch_loss_g': epoch_tr_loss_g,
                                 'train_epoch_acc': epoch_tr_acc,
-                                'log_z': log_z,
-                                'log_probs': tot_log_prob,
                                 'num_nodes_needed': np.mean(num_nodes_list),
                                 'num_edges': total_num_edges/train_num_batches}
                     wandb.log(log_dict)

@@ -435,7 +435,7 @@ def get_splits(y, train_idx, test_idx, validation=True):
 
 
 def sampler_func(sampler, batch_id, num_nodes, num_rels, horizontal_en_A_tr, norel_A_tr, A_sep, samp_num_list, depth,
-            model_g, embed_X, device):
+            model_g, embed_X, indicator_features, device):
     if sampler == 'full-mini-batch':
         A_en_sliced, after_nodes_list, rels_more = full_mini_sampler(batch_id, num_nodes,
                                                                      num_rels, horizontal_en_A_tr, depth, device)
@@ -453,6 +453,7 @@ def sampler_func(sampler, batch_id, num_nodes, num_rels, horizontal_en_A_tr, nor
             sampler,
             model_g,
             embed_X,
+            indicator_features,
             device)
     elif sampler == 'LDUN':
         A_en_sliced, after_nodes_list, idx_per_rel_list, nonzero_rel_list, rels_more = ladies_norel_sampler(batch_id,
@@ -676,7 +677,8 @@ def fastgcn_plus_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, de
     return A_en_sliced, after_nodes_list, 0
 
 
-def grapes_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, sampler, model_g, embed_X, device):
+def grapes_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, sampler, model_g, embed_X,
+                   indicator_features, device):
     previous_nodes = batch_idx
     after_nodes = torch.arange(num_nodes)
     col_ind = []
@@ -691,7 +693,13 @@ def grapes_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, s
         cols = getAdjacencyNodeColumnIdx(previous_nodes, num_nodes, 2*num_rels+1)
         A_gf = slice_adj_row_col(A_en, neighbors, cols, len(neighbors), len(previous_nodes), 'prob')
         # calculate the importance of each neighbor
-        node_logits, _ = model_g(embed_X, A_gf.to(device), neighbors, [], [], device)
+        indicator_features[neighbors, d] = 1.0
+        # batch_nodes = neighbors[~torch.isin(neighbors, previous_nodes)]
+        x = torch.cat([embed_X[neighbors],
+                    indicator_features[neighbors]],
+                    dim=1)
+
+        node_logits, _ = model_g(x, A_gf.to(device), neighbors, [], [], device)
         num_prev_nodes = len(previous_nodes)
         # calculate the probability of sampling each neighbor in each relation
         # output the relations that appear in at least one neighbor
