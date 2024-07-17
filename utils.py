@@ -857,7 +857,7 @@ def full_mini_sampler(batch_idx, num_nodes, num_rels, A_en, depth, device):
         previous_nodes = after_nodes
         # sample A
         A_en_sliced.append(slice_adj_col(A_row, col_ind, 2*num_rels+1, num_prev_nodes, 'LDRN', after_nodes,
-                                         len(after_nodes), [], []))
+                                         len(after_nodes), [], []).to(device))
         after_nodes_list.append(after_nodes)
 
     A_en_sliced.reverse()
