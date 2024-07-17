@@ -110,6 +110,7 @@ def go(project="test", name='amplus50', data_name='amplus', batch_size=2048, fea
 
 
         # training
+        adj_tr, adj_ts = adj_r_creator(data.triples, self_loop_dropout, data.num_entities, 2 * num_rels + 1)
         print('start training!')
         for epoch in range(0, num_epochs):
             loss_c = 0
@@ -131,7 +132,6 @@ def go(project="test", name='amplus50', data_name='amplus', batch_size=2048, fea
 
                     batch_node_idx_s, id_sorted = batch_node_idx.sort()
                     batch_y_train_s = batch_y_train[id_sorted]
-                    adj_tr, adj_ts = adj_r_creator(data.triples, self_loop_dropout, data.num_entities, 2*num_rels+1)
                     adj_tr_sliced, after_nodes_list, idx_per_rel_list, nonzero_rel_list, rels_more, log_probs = sampler_func(sampler,
                                                                                                            batch_node_idx,
                                                                                                            data.num_entities,
@@ -141,7 +141,7 @@ def go(project="test", name='amplus50', data_name='amplus', batch_size=2048, fea
                                                                                                            [],
                                                                                                            samp_num_list,
                                                                                                            depth,
-                                                                                                           model_g,
+                                                                                                           model_c,
                                                                                                            embed_X,
                                                                                                            device)
                     nodes_needed = [i for j in after_nodes_list for i in j]
