@@ -740,38 +740,38 @@ def ladies_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, s
     for d in range(depth):
         # row slice the adjacency by the batch nodes to find their neighbors
         A_row = slice_rows_tensor2(A_en, previous_nodes)
-        size = [len(previous_nodes), num_nodes * num_rels]
+        size = [len(previous_nodes), num_nodes * (2*num_rels+1)]
         # calculate the importance of each neighbor
         pi = calc_prob(A_row, size, num_rels, device)
         num_prev_nodes = len(previous_nodes)
         # calculate the probability of sampling each neighbor in each relation
         # output the relations that appear in at least one neighbor
-        p, nonzero_rels = sum_prob_per_rel(pi, num_nodes, num_rels)
+        p, nonzero_rels = sum_prob_per_rel(pi, num_nodes, (2*num_rels+1))
         s_num = samp_num_list[d]
         if s_num > 0:
             if sampler == 'LDRN': # node sampling by ReWise: including all the relations of a node
                 #sample nodes given their probablity.
                 # output the local and global idx of the neighbors, the probability of the nodes sampled
-                idx_local, nonzero_rels, global_idx, prob, rels_more = sel_idx_node(p, s_num, num_nodes, num_rels)
+                idx_local, nonzero_rels, global_idx, prob, rels_more = sel_idx_node(p, s_num, num_nodes, (2*num_rels+1))
                 idx_list_per_rel = []
 
             elif sampler == 'LDRE': # edge sampling by ReWise: sampling nodes in different relations
-                idx_extend, idx_local, idx_list_per_rel, s_n, rels_more = sel_idx_edge(p, s_num, num_nodes, num_rels, nonzero_rels)
-                idx_extend = torch.unique(torch.cat((idx_extend, num_nodes*(num_rels-1)+previous_nodes)))
+                idx_extend, idx_local, idx_list_per_rel, s_n, rels_more = sel_idx_edge(p, s_num, num_nodes, (2*num_rels+1), nonzero_rels)
+                idx_extend = torch.unique(torch.cat((idx_extend, num_nodes*(2*num_rels)+previous_nodes)))
             after_nodes = idx_local  # unique node idx
         else:
             after_nodes = batch_idx
         # unique node idx with aggregation
         after_nodes = torch.unique(torch.cat((after_nodes, previous_nodes.to('cpu'))))
         if sampler == 'LDRN':
-            cols = getAdjacencyNodeColumnIdx(after_nodes, num_nodes, num_rels)
+            cols = getAdjacencyNodeColumnIdx(after_nodes, num_nodes, (2*num_rels+1))
             col_ind.append(cols)
             # sample A
-            A_en_sliced.append(slice_adj_col(A_row, col_ind, num_rels, num_prev_nodes, sampler, after_nodes,
+            A_en_sliced.append(slice_adj_col(A_row, col_ind, (2*num_rels+1), num_prev_nodes, sampler, after_nodes,
                                              len(after_nodes), global_idx, prob))
         elif sampler == 'LDRE':
             col_ind.append(idx_extend)
-            A_en_sliced.append(slice_adj_col(A_row, col_ind, num_rels, num_prev_nodes, sampler, after_nodes,
+            A_en_sliced.append(slice_adj_col(A_row, col_ind, (2*num_rels+1), num_prev_nodes, sampler, after_nodes,
                                              len(idx_extend), [], []))
         previous_nodes = after_nodes
         after_nodes_list.append(after_nodes)

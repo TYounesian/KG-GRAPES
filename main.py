@@ -220,6 +220,7 @@ def go(project="test", name='amplus50', data_name='amplus', batch_size=2048, fea
                                 'train_epoch_loss_g': epoch_tr_loss_g,
                                 'train_epoch_acc': epoch_tr_acc,
                                 'log_z': log_z,
+                                'log_probs': tot_log_prob,
                                 'num_nodes_needed': np.mean(num_nodes_list),
                                 'num_edges': total_num_edges/train_num_batches}
                     wandb.log(log_dict)
