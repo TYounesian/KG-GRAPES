@@ -435,15 +435,16 @@ def get_splits(y, train_idx, test_idx, validation=True):
 
 
 def sampler_func(sampler, batch_id, num_nodes, num_rels, horizontal_en_A_tr, norel_A_tr, A_sep, samp_num_list, depth,
-            model_g, embed_X, indicator_features, device):
+            model_g, model_z, embed_X, indicator_features, device):
     if sampler == 'full-mini-batch':
         A_en_sliced, after_nodes_list, rels_more = full_mini_sampler(batch_id, num_nodes,
                                                                      num_rels, horizontal_en_A_tr, depth, device)
         idx_per_rel_list = []
         nonzero_rel_list = []
         log_probs = 0
+        log_z = 0
     elif sampler == 'grapes':
-        A_en_sliced, after_nodes_list, idx_per_rel_list, nonzero_rel_list, rels_more, log_probs = grapes_sampler(
+        A_en_sliced, after_nodes_list, idx_per_rel_list, nonzero_rel_list, rels_more, log_probs, log_z = grapes_sampler(
             batch_id,
             samp_num_list,
             num_nodes,
@@ -452,6 +453,7 @@ def sampler_func(sampler, batch_id, num_nodes, num_rels, horizontal_en_A_tr, nor
             depth,
             sampler,
             model_g,
+            model_z,
             embed_X,
             indicator_features,
             device)
@@ -466,6 +468,7 @@ def sampler_func(sampler, batch_id, num_nodes, num_rels, horizontal_en_A_tr, nor
                                                                                                             sampler,
                                                                                                             device)
         log_probs = 0.
+        log_z = 0.
     elif sampler == "LDRN" or sampler == "LDRE":
         A_en_sliced, after_nodes_list, idx_per_rel_list, nonzero_rel_list, rels_more = ladies_sampler(batch_id,
                                                                                                       samp_num_list,
@@ -476,6 +479,7 @@ def sampler_func(sampler, batch_id, num_nodes, num_rels, horizontal_en_A_tr, nor
                                                                                                       sampler,
                                                                                                       device)
         log_probs = 0.
+        log_z = 0.
     elif sampler == 'hetero':
         A_en_sliced, after_nodes_list = hetero_sampler(batch_id, samp_num_list, num_nodes,
                                                        num_rels, A_sep, depth, device)
@@ -483,6 +487,7 @@ def sampler_func(sampler, batch_id, num_nodes, num_rels, horizontal_en_A_tr, nor
         nonzero_rel_list = []
         rels_mode = []
         log_probs = 0.
+        log_z = 0.
     elif sampler == 'IARN':
         A_en_sliced, after_nodes_list, rels_more = random_sampler(batch_id, samp_num_list, num_nodes,
                                                                   num_rels,
@@ -490,6 +495,7 @@ def sampler_func(sampler, batch_id, num_nodes, num_rels, horizontal_en_A_tr, nor
         idx_per_rel_list = []
         nonzero_rel_list = []
         log_probs = 0.
+        log_z = 0.
     elif sampler == 'IDRN':
         A_en_sliced, after_nodes_list, rels_more = fastgcn_plus_sampler(batch_id, samp_num_list, num_nodes,
                                                                         num_rels,
@@ -497,7 +503,8 @@ def sampler_func(sampler, batch_id, num_nodes, num_rels, horizontal_en_A_tr, nor
         idx_per_rel_list = []
         nonzero_rel_list = []
         log_probs = 0.
-    return A_en_sliced, after_nodes_list, idx_per_rel_list, nonzero_rel_list, rels_more, log_probs
+        log_z = 0.
+    return A_en_sliced, after_nodes_list, idx_per_rel_list, nonzero_rel_list, rels_more, log_probs, log_z
 
 
 def adj_r_creator(edges, self_loop_dropout, num_nodes, num_rels):
@@ -677,7 +684,7 @@ def fastgcn_plus_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, de
     return A_en_sliced, after_nodes_list, 0
 
 
-def grapes_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, sampler, model_g, embed_X,
+def grapes_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, sampler, model_g, model_z, embed_X,
                    indicator_features, device):
     previous_nodes = batch_idx
     after_nodes = torch.arange(num_nodes)
@@ -698,8 +705,10 @@ def grapes_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, s
         x = torch.cat([embed_X[neighbors],
                     indicator_features[neighbors]],
                     dim=1)
-
         node_logits, _ = model_g(x, A_gf.to(device), neighbors, [], [], device)
+        if d == 0:
+            pred_z, _ = model_z(embed_X[neighbors], A_gf.to(device), neighbors, [], [], device)
+            log_z = pred_z.mean()
         num_prev_nodes = len(previous_nodes)
         # calculate the probability of sampling each neighbor in each relation
         # output the relations that appear in at least one neighbor
@@ -734,7 +743,7 @@ def grapes_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, s
     A_en_sliced.reverse()
     after_nodes_list.reverse()
     idx_per_rel_list.reverse()
-    return A_en_sliced, after_nodes_list, idx_per_rel_list, non_zero_rel_list, 0, log_probs
+    return A_en_sliced, after_nodes_list, idx_per_rel_list, non_zero_rel_list, 0, log_probs, log_z
 
 
 def ladies_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, sampler, device):

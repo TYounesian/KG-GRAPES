@@ -91,6 +91,9 @@ def go(project="test", name='amplus50', data_name='amplus', batch_size=2048, fea
                 model_g = MRGCN_Batch(n=data.num_entities, feat_size=feat_size+num_indicators,
                                            embed_size=embed_size, modality=modality, num_classes=1,
                                            num_rels=2 * num_rels + 1, num_bases=bases, sampler=sampler, depth=depth)
+                model_z = MRGCN_Batch(n=data.num_entities, feat_size=feat_size,
+                                      embed_size=embed_size, modality=modality, num_classes=1,
+                                      num_rels=2 * num_rels + 1, num_bases=bases, sampler=sampler, depth=depth)
 
         else:
             model_c = MRGCN_Full(n=data.num_entities, edges=data.triples, feat_size=feat_size, embed_size=embed_size,
@@ -104,8 +107,8 @@ def go(project="test", name='amplus50', data_name='amplus', batch_size=2048, fea
             optimizer_c = torch.optim.Adam([{'params': model_c.parameters(), 'lr': lr_c},
                                          {'params': embed_X, 'lr': lr_embed}], weight_decay=0)
             if sampler == 'grapes':
-                log_z = torch.tensor(log_z_init, requires_grad=True)
-                optimizer_g = torch.optim.Adam(list(model_g.parameters()) + [log_z], lr=lr_g, weight_decay=0)
+                # log_z = torch.tensor(log_z_init, requires_grad=True)
+                optimizer_g = torch.optim.Adam(list(model_g.parameters()) + list(model_z.parameters()), lr=lr_g, weight_decay=0)
             else:
                 log_z = 0.
         else:
@@ -138,7 +141,8 @@ def go(project="test", name='amplus50', data_name='amplus', batch_size=2048, fea
                     batch_y_train_s = batch_y_train[id_sorted]
                     indicator_features.zero_()
                     indicator_features[batch_node_idx_s, -1] = 1.0
-                    adj_tr_sliced, after_nodes_list, idx_per_rel_list, nonzero_rel_list, rels_more, log_probs = sampler_func(sampler,
+                    adj_tr_sliced, after_nodes_list, idx_per_rel_list, nonzero_rel_list, rels_more, log_probs, log_z = \
+                        sampler_func(sampler,
                                                                                                            batch_node_idx,
                                                                                                            data.num_entities,
                                                                                                            num_rels,
@@ -148,6 +152,7 @@ def go(project="test", name='amplus50', data_name='amplus', batch_size=2048, fea
                                                                                                            samp_num_list,
                                                                                                            depth,
                                                                                                            model_g,
+                                                                                                           model_z,
                                                                                                            embed_X,
                                                                                                            indicator_features,
                                                                                                            device)
