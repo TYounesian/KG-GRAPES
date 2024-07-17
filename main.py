@@ -78,10 +78,7 @@ def go(project="test", name='amplus50', data_name='amplus', batch_size=2048, fea
             embed_X = extract_embeddings(data, feat_size)
 
         else:  # If RGCN
-            if torch.cuda.is_available():
-                embed_X = nn.Parameter(torch.cuda.FloatTensor(data.num_entities, feat_size), requires_grad=True)
-            else:
-                embed_X = nn.Parameter(torch.FloatTensor(data.num_entities, feat_size), requires_grad=True)
+            embed_X = nn.Parameter(torch.FloatTensor(data.num_entities, feat_size), requires_grad=True)
             # nn.init.xavier_uniform_(embed_X, gain=nn.init.calculate_gain('relu'))
             nn.init.kaiming_normal_(embed_X, mode='fan_in')
 
