@@ -785,11 +785,11 @@ def ladies_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, s
             col_ind.append(cols)
             # sample A
             A_en_sliced.append(slice_adj_col(A_row, col_ind, (2*num_rels+1), num_prev_nodes, sampler, after_nodes,
-                                             len(after_nodes), global_idx, prob))
+                                             len(after_nodes), global_idx, prob).to(device))
         elif sampler == 'LDRE':
             col_ind.append(idx_extend)
             A_en_sliced.append(slice_adj_col(A_row, col_ind, (2*num_rels+1), num_prev_nodes, sampler, after_nodes,
-                                             len(idx_extend), [], []))
+                                             len(idx_extend), [], []).to(device))
         previous_nodes = after_nodes
         after_nodes_list.append(after_nodes)
         idx_list_per_rel_dev = [i.to(device) for i in idx_list_per_rel]
