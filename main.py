@@ -206,6 +206,7 @@ def go(project="test", name='amplus50', data_name='amplus', batch_size=2048, fea
                     else:
                         batch_loss_g = 0.
                         tot_log_prob = 0.
+                        cost_gfn = 0.
 
                     log_dict = {'epoch': epoch,
                                 'train_batch_loss_c': batch_loss_train,

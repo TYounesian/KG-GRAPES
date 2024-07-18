@@ -1048,23 +1048,39 @@ def slice_adj_row_col(A, row_ind, col_ind, num_prev_nodes, num_after_nodes, mode
     if mode == 'prob':
         # add self-loops to make A_r square
         self_loops = torch.unique(row)
-        self_loops_r = self_loops + r * n
-        row = torch.cat((row[0:-1], self_loops))
-        col = torch.cat((col[0:-1], self_loops_r))
+        self_loops_r = self_loops + (r-1) * n
+        row = torch.cat((row[0:-num_after_nodes], self_loops))
+        col = torch.cat((col[0:-num_after_nodes], self_loops_r))
         col_ind = torch.unique(torch.cat((col, col_ind)))
         # size is now square because we added the self-loops
         col_size = num_prev_nodes
+
+        col_mx = torch.max(row_ind) + 1
+        map = torch.empty((int(col_mx),), dtype=torch.long)
+        map1 = map.scatter_(0, row_ind, torch.arange(len(row_ind)))
+        idx_m = torch.remainder(col, n).long()
+        idx_d = torch.floor_divide(col, n).long()
+        col = map1[idx_m] + idx_d * num_prev_nodes
     else:
         col_size = num_after_nodes
+
+        col_mx = torch.max(col_ind[0:num_after_nodes]) + 1
+        map = torch.empty((int(col_mx),), dtype=torch.long)
+        map1 = map.scatter_(0, col_ind[0:num_after_nodes], torch.arange(num_after_nodes))
+        idx_m = torch.remainder(col, n).long()
+        idx_d = torch.floor_divide(col, n).long()
+        col = map1[idx_m] + idx_d * num_prev_nodes
 
     row_mx = torch.max(row_ind) + 1
     map = torch.empty((int(row_mx),), dtype=torch.long)
     map1 = map.scatter_(0, row_ind, torch.arange(len(row_ind)))
     row = torch.gather(map1, 0, row)
-    col_mx = torch.max(col_ind) + 1
-    map = torch.empty((int(col_mx),), dtype=torch.long)
-    map1 = map.scatter_(0, col_ind, torch.arange(len(col_ind)))
-    col = torch.gather(map1, 0, col)
+
+
+    # col_mx = torch.max(col_ind) + 1
+    # map = torch.empty((int(col_mx),), dtype=torch.long)
+    # map1 = map.scatter_(0, col_ind, torch.arange(len(col_ind)))
+    # col = torch.gather(map1, 0, col)
 
     indices = torch.vstack([row, col])
     size = [num_prev_nodes, col_size * r]
