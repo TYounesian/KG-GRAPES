@@ -116,7 +116,8 @@ def go(project="test", name='amplus50', data_name='amplus', batch_size=2048, fea
 
 
         # training
-        adj_tr, adj_ts = adj_r_creator(data.triples, self_loop_dropout, data.num_entities, 2 * num_rels + 1)
+        adj_tr, adj_ts, adj_norel_tr = adj_r_creator(data.triples, self_loop_dropout, data.num_entities, 2 * num_rels + 1, sampler)
+
         indicator_features = torch.zeros((data.num_entities, num_indicators))
         print('start training!')
         for epoch in range(0, num_epochs):
@@ -147,7 +148,7 @@ def go(project="test", name='amplus50', data_name='amplus', batch_size=2048, fea
                                                                                                            data.num_entities,
                                                                                                            num_rels,
                                                                                                            adj_tr,
-                                                                                                           [],
+                                                                                                           adj_norel_tr,
                                                                                                            [],
                                                                                                            samp_num_list,
                                                                                                            depth,

@@ -507,7 +507,7 @@ def sampler_func(sampler, batch_id, num_nodes, num_rels, horizontal_en_A_tr, nor
     return A_en_sliced, after_nodes_list, idx_per_rel_list, nonzero_rel_list, rels_more, log_probs, log_z
 
 
-def adj_r_creator(edges, self_loop_dropout, num_nodes, num_rels):
+def adj_r_creator(edges, self_loop_dropout, num_nodes, num_rels, sampler):
     edges_en_tr = enrich_with_drop(edges, self_loop_dropout, num_nodes,
                                    int((num_rels - 1) / 2))
     edges_en_ts = enrich_with_drop(edges, 0, num_nodes, int((num_rels - 1) / 2))
@@ -528,8 +528,17 @@ def adj_r_creator(edges, self_loop_dropout, num_nodes, num_rels):
     # constructing the horizontal and vertical Adj matrices
     hor_en_adj_tr = torch.sparse.FloatTensor(indices=hor_en_ind_tr.t(), values=vals_en_tr, size=hor_en_size_tr)
     hor_en_adj_ts = torch.sparse.FloatTensor(indices=hor_en_ind_ts.t(), values=vals_en_ts, size=hor_en_size_ts)
+    norel_A_tr = []
+    if sampler == 'LDUN':
+        norel_ind_tr, norel_size_tr = adj_norel(edges_en_tr, num_nodes)
 
-    return hor_en_adj_tr, hor_en_adj_ts
+        norel_vals_en_tr = torch.ones(norel_ind_tr.size(0), dtype=torch.float)
+        norel_vals_en_tr = norel_vals_en_tr / sum_sparse(norel_ind_tr, norel_vals_en_tr, norel_size_tr, True)
+
+        norel_A_tr = torch.sparse.FloatTensor(indices=norel_ind_tr.t(), values=norel_vals_en_tr,
+                                              size=norel_size_tr)
+
+    return hor_en_adj_tr, hor_en_adj_ts, norel_A_tr
 
 
 def sample_neighborhoods_from_probs(logits, A, num_samples, num_rels):
@@ -549,7 +558,7 @@ def sample_neighborhoods_from_probs(logits, A, num_samples, num_rels):
     n = A.shape[1] // (2*num_rels+1)
     if k >= n:
         logprobs = torch.nn.functional.logsigmoid(logits.squeeze(-1))
-        return A, logprobs, {}
+        return torch.arange(0, len(logits)), logprobs, {}
     assert k < n
     assert k > 0
 
@@ -726,7 +735,7 @@ def grapes_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, s
             # idx_local, nonzero_rels, global_idx, prob, rels_more = sel_idx_node(p, s_num, num_nodes, num_rels)
             idx_list_per_rel = []
 
-            after_nodes = idx_local  # unique node idx
+            after_nodes = neighbors[idx_local]  # unique node idx
         else:
             after_nodes = batch_idx
         # unique node idx with aggregation
@@ -838,10 +847,10 @@ def ladies_norel_sampler(batch_idx, samp_num_list, num_nodes, num_rels, nore_A, 
         # unique node idx with aggregation
         after_nodes = torch.unique(torch.cat((after_nodes, previous_nodes.to('cpu'))))
         if sampler == 'LDRN' or sampler == 'LDUN':
-            cols = getAdjacencyNodeColumnIdx(after_nodes, num_nodes, num_rels)
+            cols = getAdjacencyNodeColumnIdx(after_nodes, num_nodes, 2*num_rels+1)
             col_ind.append(cols)
             # sample A
-            A_en_sliced.append(slice_adj_col(A_en_row, col_ind, num_rels, num_prev_nodes, sampler, after_nodes,
+            A_en_sliced.append(slice_adj_col(A_en_row, col_ind, 2*num_rels+1, num_prev_nodes, sampler, after_nodes,
                                              len(after_nodes), global_idx, prob))
 
         previous_nodes = after_nodes
