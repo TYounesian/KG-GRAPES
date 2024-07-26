@@ -38,7 +38,7 @@ class MRGCN_Batch(nn.Module):
 
         self.batch_rgcn.to(device)
 
-        if self.sampler == "LDRN" or self.sampler == "LDRE" or self.sampler =='LRUN':
+        if self.sampler == "LDRN" or self.sampler == "LDRE" or self.sampler =='LDUN':
             out = self.batch_rgcn(em_X_dev, A_en_sliced, 'full', idx_per_rel_list, nonzero_rel_list)
         else:
             out = self.batch_rgcn(em_X_dev, A_en_sliced, 'full', [], [])

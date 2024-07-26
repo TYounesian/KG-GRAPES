@@ -144,7 +144,7 @@ def go(project="test", name='amplus50', data_name='amplus', batch_size=2048, fea
                     indicator_features[batch_node_idx_s, -1] = 1.0
                     adj_tr_sliced, after_nodes_list, idx_per_rel_list, nonzero_rel_list, rels_more, log_probs, log_z = \
                         sampler_func(sampler,
-                                                                                                           batch_node_idx,
+                                                                                                           batch_node_idx_s,
                                                                                                            data.num_entities,
                                                                                                            num_rels,
                                                                                                            adj_tr,
@@ -152,8 +152,8 @@ def go(project="test", name='amplus50', data_name='amplus', batch_size=2048, fea
                                                                                                            [],
                                                                                                            samp_num_list,
                                                                                                            depth,
-                                                                                                           model_g,
-                                                                                                           model_z,
+                                                                                                           model_c,
+                                                                                                           model_c,
                                                                                                            embed_X,
                                                                                                            indicator_features,
                                                                                                            device)
