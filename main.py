@@ -46,10 +46,10 @@ def go(project="test", name='amplus50', data_name='amplus', batch_size=2048, fea
             pkl.dump(data, f)
     data = kg.group(data)
 
-    train_idx = data.training[:, 0]
-    y_train = data.training[:, 1]
-    test_idx = data.withheld[:, 0]
-    y_test = data.withheld[:, 1]
+    train_idx = data.training[:, 0].long()
+    y_train = data.training[:, 1].long()
+    test_idx = data.withheld[:, 0].long()
+    y_test = data.withheld[:, 1].long()
     num_rels = data.num_relations
 
     save_model_info = False
@@ -152,8 +152,8 @@ def go(project="test", name='amplus50', data_name='amplus', batch_size=2048, fea
                                                                                                            [],
                                                                                                            samp_num_list,
                                                                                                            depth,
-                                                                                                           model_c,
-                                                                                                           model_c,
+                                                                                                           model_g,
+                                                                                                           model_z,
                                                                                                            embed_X,
                                                                                                            indicator_features,
                                                                                                            device)
