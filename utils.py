@@ -739,7 +739,7 @@ def grapes_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, s
         else:
             after_nodes = batch_idx
         # unique node idx with aggregation
-        after_nodes = torch.unique(torch.cat((after_nodes, previous_nodes.to('cpu'))))
+        after_nodes = torch.unique(torch.cat((after_nodes, batch_idx.to('cpu'))))
         cols = getAdjacencyNodeColumnIdx(after_nodes, num_nodes, 2*num_rels+1)
         col_ind.append(cols)
         # sample A

@@ -187,7 +187,7 @@ def go(project="test", name='amplus50', data_name='amplus', batch_size=2048, fea
                         batch_loss_train = batch_loss_train + l2 * embed_X.pow(2).sum()
 
                     with torch.no_grad():
-                        batch_acc_train = (batch_out_train.argmax(dim=1) == batch_y_train_s).sum().item()/train_batch_size * 100
+                        batch_acc_train = (batch_out_train.argmax(dim=1) == batch_y_train_s).sum().item()/len(batch_y_train_s) * 100
                     print(f'train batch time ({time.time() - start:.4}s).')
                     print(f'Repeat: {i}, Training Epoch: {epoch}, batch number: {batch_id}/{train_num_batches}, '
                           f'Accuracy: {batch_acc_train}')
@@ -224,7 +224,84 @@ def go(project="test", name='amplus50', data_name='amplus', batch_size=2048, fea
                     # total_num_edges += num_edges
                     total_rels_more += rels_more
 
-                if epoch == num_epochs - 1:
+                    if epoch == num_epochs - 1:
+                        import networkx as nx
+                        import matplotlib.pyplot as plt
+                        # Initialize graph
+                        graph = nx.DiGraph()
+                        for target in batch_node_idx_s:
+                            target_name = data.i2e[target][0].split('/')[-1].split('#')[-1]
+                            target_label = data.training[torch.nonzero(data.training[:,0] == target).squeeze(), 1]
+                            graph.add_node(target_name, label=target_label, color='red')
+
+                            # Add first-hop neighbors
+                        for neighbor in after_nodes_list[1]:
+                            if neighbor not in batch_node_idx_s:
+                                neighbor_name = data.i2e[neighbor][0].split('/')[-1].split('#')[-1]
+                                if neighbor in data.training[:,0]:
+                                    neighbor_label = data.training[torch.nonzero(data.training[:,0] == neighbor).squeeze(), 1]
+                                elif neighbor in data.withheld[:,0]:
+                                    neighbor_label = data.withheld[torch.nonzero(data.withheld[:,0] == neighbor).squeeze(), 1]
+                                else:
+                                    neighbor_label = y_train.max() + 1
+                                graph.add_node(neighbor_name, label=neighbor_label, color='blue')
+                                # Add edges with relation labels
+                                for s, r, o in data.triples:
+                                    if s in batch_node_idx_s and o == neighbor:
+                                        relation_name = data.i2r[r].split('/')[-1].split('#')[-1]
+                                        graph.add_edge(data.i2e[s][0].split('/')[-1].split('#')[-1], neighbor_name,
+                                                       label=relation_name)
+                                    elif o in batch_node_idx_s and s == neighbor:
+                                        relation_name = data.i2r[r].split('/')[-1].split('#')[-1]
+                                        graph.add_edge(neighbor_name, data.i2e[o][0].split('/')[-1].split('#')[-1],
+                                                       label=relation_name)
+
+                        # Add second-hop neighbors
+                        for neighbor in after_nodes_list[0]:
+                            if neighbor not in after_nodes_list[1] and neighbor not in batch_node_idx_s:
+                                neighbor_name = data.i2e[neighbor.item()][0].split('/')[-1].split('#')[-1]
+                                if neighbor in data.training[:,0]:
+                                    neighbor_label = data.training[torch.nonzero(data.training[:,0] == neighbor).squeeze(), 1]
+                                elif neighbor in data.withheld[:,0]:
+                                    neighbor_label = data.withheld[torch.nonzero(data.withheld[:,0] == neighbor).squeeze(), 1]
+                                else:
+                                    neighbor_label = y_train.max() + 1
+                                graph.add_node(neighbor_name, label=neighbor_label, color='green')
+                                # Add edges with relation labels
+                                for s, r, o in data.triples:
+                                    if s in after_nodes_list[1] and o == neighbor:
+                                        relation_name = data.i2r[r].split('/')[-1].split('#')[-1]
+                                        graph.add_edge(data.i2e[s][0].split('/')[-1].split('#')[-1], neighbor_name,
+                                                       label=relation_name)
+                                    elif o in after_nodes_list[1] and s == neighbor:
+                                        relation_name = data.i2r[r].split('/')[-1].split('#')[-1]
+                                        graph.add_edge(neighbor_name, data.i2e[o][0].split('/')[-1].split('#')[-1],
+                                                       label=relation_name)
+
+                        # Visualization
+                        pos = nx.spring_layout(graph)  # or other layout algorithms like nx.circular_layout
+
+                        # Extract node colors
+                        node_colors = [data['color'] for _, data in graph.nodes(data=True)]
+
+                        # Draw nodes
+                        nx.draw_networkx_nodes(graph, pos, node_color=node_colors, node_size=500)
+
+                        # Draw edges
+                        nx.draw_networkx_edges(graph, pos, arrows=True)
+
+                        # Draw node labels
+                        node_labels = {node: f"{node} ({data['label']})" for node, data in graph.nodes(data=True)}
+                        nx.draw_networkx_labels(graph, pos, labels=node_labels, font_size=5, font_color='black')
+
+                        # Draw edge labels
+                        edge_labels = nx.get_edge_attributes(graph, 'label')
+                        nx.draw_networkx_edge_labels(graph, pos, edge_labels=edge_labels, font_size=5, font_color='gray')
+
+
+
+
+
                     layers_c = [model_c.batch_rgcn.comp1.to('cpu'), model_c.batch_rgcn.comp2.to('cpu')]
                     with open(f"{data_name}_comps.pkl", 'wb') as f:
                         pkl.dump(layers_c, f)
@@ -277,7 +354,7 @@ def go(project="test", name='amplus50', data_name='amplus', batch_size=2048, fea
 
                         batch_loss_test = criterion(batch_out_test, batch_y_test_s)  ###### TODO: l2 penalty #######
                         with torch.no_grad():
-                            batch_acc_test = (batch_out_test.argmax(dim=1) == batch_y_test_s).sum().item()/test_batch_size * 100
+                            batch_acc_test = (batch_out_test.argmax(dim=1) == batch_y_test_s).sum().item()/len(batch_y_test_s) * 100
                         print("Repeat", i, ", Testing Epoch: ", epoch, " , batch number: ", batch_id, "/", test_num_batches, "Accuracy:",
                               batch_acc_test)
 
@@ -372,7 +449,7 @@ def go(project="test", name='amplus50', data_name='amplus', batch_size=2048, fea
                 if i == 0:
                     wandb.log({"test_epoch_loss": loss_test.detach(), 'epoch': epoch})
                     wandb.log({"test_epoch_acc": epoch_ts_acc, 'epoch': epoch})
-
+                results[i] = epoch_ts_acc
     print(f'Acc: {results.mean():.2f} ± {results.std():.2f}')
 
 
