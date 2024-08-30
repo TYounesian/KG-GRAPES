@@ -11,6 +11,8 @@ import torchvision as tv
 from PIL import ImageOps
 import time
 from torch.distributions import Bernoulli, Gumbel
+import networkx as nx
+
 
 def d(tensor=None):
     """
@@ -696,7 +698,6 @@ def fastgcn_plus_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, de
 def grapes_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, sampler, model_g, model_z, embed_X,
                    indicator_features, device):
     previous_nodes = batch_idx
-    after_nodes = torch.arange(num_nodes)
     col_ind = []
     A_en_sliced = []
     after_nodes_list = []
@@ -707,6 +708,7 @@ def grapes_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, s
     for d in range(depth):
         neighbors = get_neighbours_sparse(A_en, previous_nodes)
         cols = getAdjacencyNodeColumnIdx(previous_nodes, num_nodes, 2*num_rels+1)
+        # A_en_row = slice_rows_tensor2(A_en, previous_nodes)
         A_gf = slice_adj_row_col(A_en, neighbors, cols, len(neighbors), len(previous_nodes), 'prob')
         # calculate the importance of each neighbor
         indicator_features[neighbors, d] = 1.0
@@ -743,6 +745,8 @@ def grapes_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, s
         cols = getAdjacencyNodeColumnIdx(after_nodes, num_nodes, 2*num_rels+1)
         col_ind.append(cols)
         # sample A
+        # A_en_sliced.append(slice_adj_col(A_en_row, col_ind, 2 * num_rels + 1, num_prev_nodes, sampler, after_nodes,
+        #                                  len(after_nodes), [], []).to(device))
         A_en_sliced.append(slice_adj_row_col(A_en, previous_nodes, cols, num_prev_nodes, len(after_nodes), 'cl').to(device))
         previous_nodes = after_nodes
         after_nodes_list.append(after_nodes)
@@ -845,7 +849,7 @@ def ladies_norel_sampler(batch_idx, samp_num_list, num_nodes, num_rels, nore_A, 
         else:
             after_nodes = batch_idx
         # unique node idx with aggregation
-        after_nodes = torch.unique(torch.cat((after_nodes, previous_nodes.to('cpu'))))
+        after_nodes = torch.unique(torch.cat((after_nodes, batch_idx.to('cpu'))))
         if sampler == 'LDRN' or sampler == 'LDUN':
             cols = getAdjacencyNodeColumnIdx(after_nodes, num_nodes, 2*num_rels+1)
             col_ind.append(cols)
@@ -1195,3 +1199,105 @@ def get_sampled_rels(A_en_sliced, num_rels):
     return [nodes_in_rels0, nodes_in_rels1]
 
 
+def plot_graph(batch_node_idx_s, data, after_nodes_list, batch_out_train, batch_y_train_s, y_train):
+
+    # Initialize graph
+    graph = nx.DiGraph()
+    correct_target = []
+    label_dict = {0: 'accommodation', 1: 'facility', 2: 'location', 3: 'room', 4: 'no'}
+    for i, target in enumerate(batch_node_idx_s):
+        if batch_out_train[i].argmax() == batch_y_train_s[i]:
+            correct_target.append(target)
+            target_name = data.i2e[target][0].split('/')[-1].split('#')[-1]
+            target_label = data.training[torch.nonzero(data.training[:,0] == target).squeeze(), 1]
+            graph.add_node(target_name, label=label_dict[target_label.item()], color='red')
+        else:
+            target_name = data.i2e[target][0].split('/')[-1].split('#')[-1]
+            target_label = data.training[torch.nonzero(data.training[:, 0] == target).squeeze(), 1]
+            graph.add_node(target_name, label=label_dict[target_label.item()], color='pink')
+        # Add first-hop neighbors
+        for neighbor in after_nodes_list[1]:
+            if neighbor not in batch_node_idx_s:
+                neighbor_name = data.i2e[neighbor][0].split('/')[-1].split('#')[-1]
+                if neighbor in data.training[:, 0]:
+                    neighbor_label = data.training[
+                        torch.nonzero(data.training[:, 0] == neighbor).squeeze(), 1]
+                elif neighbor in data.withheld[:, 0]:
+                    neighbor_label = data.withheld[
+                        torch.nonzero(data.withheld[:, 0] == neighbor).squeeze(), 1]
+                else:
+                    neighbor_label = y_train.max() + 1
+                graph.add_node(neighbor_name, label=label_dict[neighbor_label.item()],
+                               color='blue')
+        # Add second-hop neighbors
+        for neighbor in after_nodes_list[0]:
+            if neighbor not in after_nodes_list[1] and neighbor not in batch_node_idx_s:
+                neighbor_name = data.i2e[neighbor.item()][0].split('/')[-1].split('#')[-1]
+                if neighbor in data.training[:, 0]:
+                    neighbor_label = data.training[
+                        torch.nonzero(data.training[:, 0] == neighbor).squeeze(), 1]
+                elif neighbor in data.withheld[:, 0]:
+                    neighbor_label = data.withheld[
+                        torch.nonzero(data.withheld[:, 0] == neighbor).squeeze(), 1]
+                else:
+                    neighbor_label = y_train.max() + 1
+                graph.add_node(neighbor_name, label=label_dict[neighbor_label.item()],
+                               color='green')
+
+    for s, r, o in data.triples:
+        if s in batch_node_idx_s or s in after_nodes_list[0] or s in after_nodes_list[1]:
+            neighbor_name = data.i2e[o][0].split('/')[-1].split('#')[-1]
+            relation_name = data.i2r[r].split('/')[-1].split('#')[-1]
+            if o in data.training[:, 0]:
+                neighbor_label = data.training[
+                    torch.nonzero(data.training[:, 0] == o).squeeze(), 1]
+            elif o in data.withheld[:, 0]:
+                neighbor_label = data.withheld[
+                    torch.nonzero(data.withheld[:, 0] == o).squeeze(), 1]
+            else:
+                neighbor_label = y_train.max() + 1
+            if o in batch_node_idx_s or o in after_nodes_list[1] or o in after_nodes_list[0]:
+                graph.add_edge(data.i2e[s][0].split('/')[-1].split('#')[-1], neighbor_name,
+                            label=relation_name, color='black')
+            else:
+                graph.add_node(neighbor_name, label=label_dict[neighbor_label.item()], color='grey')
+                graph.add_edge(data.i2e[s][0].split('/')[-1].split('#')[-1], neighbor_name,
+                               label=relation_name, color='grey')
+        # if o in batch_node_idx_s or o in after_nodes_list[0] or o in after_nodes_list[1]:
+        #     neighbor_name = data.i2e[o][0].split('/')[-1].split('#')[-1]
+        #     relation_name = data.i2r[r].split('/')[-1].split('#')[-1]
+        #     if o in data.training[:, 0]:
+        #         neighbor_label = data.training[
+        #             torch.nonzero(data.training[:, 0] == o).squeeze(), 1]
+        #     elif o in data.withheld[:, 0]:
+        #         neighbor_label = data.withheld[
+        #             torch.nonzero(data.withheld[:, 0] == o).squeeze(), 1]
+        #     else:
+        #         neighbor_label = y_train.max() + 1
+        #     if s in after_nodes_list[1] or s in after_nodes_list[0] or s in batch_node_idx_s:
+        #         graph.add_edge(data.i2e[s][0].split('/')[-1].split('#')[-1], neighbor_name,
+        #                        label=relation_name, color='black')
+        #     else:
+        #         graph.add_node(neighbor_name, label=label_dict[neighbor_label.item()], color='grey')
+        #         graph.add_edge(data.i2e[s][0].split('/')[-1].split('#')[-1], neighbor_name,
+        #                        label=relation_name, color='grey')
+
+    # Visualization
+    pos = nx.spring_layout(graph, k=1.5, iterations=50)  # or other layout algorithms like nx.circular_layout
+
+    # Extract node colors
+    node_colors = [data['color'] for _, data in graph.nodes(data=True)]
+
+    # Draw nodes
+    nx.draw_networkx_nodes(graph, pos, node_color=node_colors, node_size=500)
+
+    # Draw edges
+    nx.draw_networkx_edges(graph, pos, arrows=True)
+
+    # Draw node labels
+    node_labels = {node: f"{node} ({data['label']})" for node, data in graph.nodes(data=True)}
+    nx.draw_networkx_labels(graph, pos, labels=node_labels, font_size=5, font_color='black')
+
+    # Draw edge labels
+    edge_labels = nx.get_edge_attributes(graph, 'label')
+    nx.draw_networkx_edge_labels(graph, pos, edge_labels=edge_labels, font_size=5, font_color='gray')
