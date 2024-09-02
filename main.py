@@ -107,7 +107,7 @@ def go(project="test", name='amplus50', data_name='amplus', batch_size=2048, fea
         model_measure = 'comps'
         if modality == 'no':
             optimizer_c = torch.optim.Adam([{'params': model_c.parameters(), 'lr': lr_c},
-                                         {'params': embed_X, 'lr': lr_embed}], weight_decay=0)
+                                         {'params': embed_X, 'lr': lr_c}], weight_decay=0)
             if sampler == 'grapes':
                 # log_z = torch.tensor(log_z_init, requires_grad=True)
                 optimizer_g = torch.optim.Adam(list(model_g.parameters()) + list(model_z.parameters()), lr=lr_g, weight_decay=0)
@@ -169,7 +169,7 @@ def go(project="test", name='amplus50', data_name='amplus', batch_size=2048, fea
 
                     batch_out_train, nodes_in_rels = model_c(embed_X, adj_tr_sliced,
                                                             after_nodes_list, idx_per_rel_list,
-                                                            nonzero_rel_list, device)
+                                                            nonzero_rel_list, test_state, device)
 
                     if save_model_info and epoch == 0:
                         if batch_id == 0:
@@ -225,14 +225,14 @@ def go(project="test", name='amplus50', data_name='amplus', batch_size=2048, fea
                     num_nodes_list.append(len(nodes_needed))
                     # total_num_edges += num_edges
                     total_rels_more += rels_more
-                    draw = True
-                    if epoch == num_epochs - 1 and draw:
+                    draw = False
+                    # if epoch == num_epochs - 1 and draw:
                         # plot_graph(batch_node_idx_s, data, after_nodes_list, batch_out_train, batch_y_train_s,
                         # y_train)
-                        sampled_dict = {'targets': batch_node_idx_s, 'after_nodes_list': after_nodes_list,
-                                        'out': batch_out_train, 'batch_y': batch_y_train_s}
-                        with open(f"{data_name}_sampled_train{batch_id}.pkl", 'wb') as f:
-                            pkl.dump(sampled_dict, f)
+                        # sampled_dict = {'targets': batch_node_idx_s, 'after_nodes_list': after_nodes_list,
+                        #                 'out': batch_out_train, 'batch_y': batch_y_train_s}
+                        # with open(f"{data_name}_sampled_train{batch_id}.pkl", 'wb') as f:
+                        #     pkl.dump(sampled_dict, f)
 
                     layers_c = [model_c.batch_rgcn.comp1.to('cpu'), model_c.batch_rgcn.comp2.to('cpu')]
                     with open(f"{data_name}_comps.pkl", 'wb') as f:
@@ -267,6 +267,7 @@ def go(project="test", name='amplus50', data_name='amplus', batch_size=2048, fea
 
             # testing
                 model_c.eval()
+                model_g.eval()
                 loss = 0
                 acc = 0
                 if (test_state == 'LDRN' or test_state == 'full-mini') and testing:
@@ -280,9 +281,27 @@ def go(project="test", name='amplus50', data_name='amplus', batch_size=2048, fea
 
                         batch_node_idx_s, id_sorted = batch_node_idx.sort()
                         batch_y_test_s = batch_y_test[id_sorted]
+                        indicator_features.zero_()
+                        indicator_features[batch_node_idx_s, -1] = 1.0
+                        adj_ts_sliced, after_nodes_list, idx_per_rel_list, nonzero_rel_list, rels_more, log_probs, log_z = \
+                            sampler_func(sampler,
+                                         batch_node_idx_s,
+                                         data.num_entities,
+                                         num_rels,
+                                         adj_ts,
+                                         adj_norel_tr,
+                                         [],
+                                         samp_num_list,
+                                         depth,
+                                         model_g,
+                                         model_z,
+                                         embed_X,
+                                         indicator_features,
+                                         device)
 
-                        batch_out_test, _ = model_c(data=data, embed_X=embed_X, batch_id=batch_node_idx_s,
-                                                  test_state=test_state, device=device)
+                        batch_out_test, _ = model_c(embed_X, adj_ts_sliced,
+                                                            after_nodes_list, idx_per_rel_list,
+                                                            nonzero_rel_list, test_state, device)
 
                         batch_loss_test = criterion(batch_out_test, batch_y_test_s)  ###### TODO: l2 penalty #######
                         with torch.no_grad():
@@ -293,8 +312,10 @@ def go(project="test", name='amplus50', data_name='amplus', batch_size=2048, fea
                         loss += batch_loss_test
                         acc += batch_acc_test
 
+                    loss_test = loss / test_num_batches
+                    acc_test = acc / test_num_batches
                 elif test_state == 'full' and testing:
-                    out, _ = model_c(embed_X, adj_ts.to(device), [], [], [], device=device)
+                    out, _ = model_c(embed_X, adj_ts.to(device), [], [], [], test_state, device=device)
                     out_test = out[test_idx, :]
 
                     loss_test = criterion(out_test, y_test)

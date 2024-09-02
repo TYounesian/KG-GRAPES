@@ -543,7 +543,7 @@ def adj_r_creator(edges, self_loop_dropout, num_nodes, num_rels, sampler):
     return hor_en_adj_tr, hor_en_adj_ts, norel_A_tr
 
 
-def sample_neighborhoods_from_probs(logits, A, num_samples, num_rels):
+def sample_neighborhoods_from_probs(logits, A, num_samples, num_rels, test):
     """Remove edges from an edge index, by removing nodes according to some
     probability.
 
@@ -570,8 +570,10 @@ def sample_neighborhoods_from_probs(logits, A, num_samples, num_rels):
     gumbel = Gumbel(torch.tensor(0., device=logits.device), torch.tensor(1., device=logits.device))
     gumbel_noise = gumbel.sample((n,))
     perturbed_log_probs = b.probs.log() + gumbel_noise
-
-    samples = torch.topk(perturbed_log_probs, k=k, dim=0, sorted=False)[1].to('cpu')
+    if test:
+        samples = torch.topk(b.probs, k=k, dim=0, sorted=False)[1].to('cpu')
+    else:
+        samples = torch.topk(perturbed_log_probs, k=k, dim=0, sorted=False)[1].to('cpu')
 
     # calculate the entropy in bits
     entropy = -(b.probs * (b.probs).log2() + (1 - b.probs) * (1 - b.probs).log2())
@@ -716,9 +718,9 @@ def grapes_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, s
         x = torch.cat([embed_X[neighbors],
                     indicator_features[neighbors]],
                     dim=1)
-        node_logits, _ = model_g(x, A_gf.to(device), neighbors, [], [], device)
+        node_logits, _ = model_g(x, A_gf.to(device), neighbors, [], [], 'full', device)
         if d == 0:
-            pred_z, _ = model_z(embed_X[neighbors], A_gf.to(device), neighbors, [], [], device)
+            pred_z, _ = model_z(embed_X[neighbors], A_gf.to(device), neighbors, [], [], 'full', device)
             log_z = pred_z.mean()
         num_prev_nodes = len(previous_nodes)
         # calculate the probability of sampling each neighbor in each relation
@@ -730,7 +732,8 @@ def grapes_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, s
                 node_logits,
                 A_gf,
                 s_num,
-            num_rels)
+            num_rels,
+            model_g.training)
             log_probs.append(log_prob)
             # sample nodes given their probablity.
             # output the local and global idx of the neighbors, the probability of the nodes sampled
@@ -1216,33 +1219,31 @@ def plot_graph(batch_node_idx_s, data, after_nodes_list, batch_out_train, batch_
             target_label = data.training[torch.nonzero(data.training[:, 0] == target).squeeze(), 1]
             graph.add_node(target_name, label=label_dict[target_label.item()], color='pink')
         # Add first-hop neighbors
-        for neighbor in after_nodes_list[1]:
-            if neighbor not in batch_node_idx_s:
-                neighbor_name = data.i2e[neighbor][0].split('/')[-1].split('#')[-1]
-                if neighbor in data.training[:, 0]:
-                    neighbor_label = data.training[
-                        torch.nonzero(data.training[:, 0] == neighbor).squeeze(), 1]
-                elif neighbor in data.withheld[:, 0]:
-                    neighbor_label = data.withheld[
-                        torch.nonzero(data.withheld[:, 0] == neighbor).squeeze(), 1]
-                else:
-                    neighbor_label = y_train.max() + 1
-                graph.add_node(neighbor_name, label=label_dict[neighbor_label.item()],
-                               color='blue')
-        # Add second-hop neighbors
-        for neighbor in after_nodes_list[0]:
-            if neighbor not in after_nodes_list[1] and neighbor not in batch_node_idx_s:
-                neighbor_name = data.i2e[neighbor.item()][0].split('/')[-1].split('#')[-1]
-                if neighbor in data.training[:, 0]:
-                    neighbor_label = data.training[
-                        torch.nonzero(data.training[:, 0] == neighbor).squeeze(), 1]
-                elif neighbor in data.withheld[:, 0]:
-                    neighbor_label = data.withheld[
-                        torch.nonzero(data.withheld[:, 0] == neighbor).squeeze(), 1]
-                else:
-                    neighbor_label = y_train.max() + 1
-                graph.add_node(neighbor_name, label=label_dict[neighbor_label.item()],
-                               color='green')
+    for neighbor in after_nodes_list[1]:
+        if neighbor not in batch_node_idx_s:
+            neighbor_name = data.i2e[neighbor][0].split('/')[-1].split('#')[-1]
+            if neighbor in data.training[:, 0]:
+                neighbor_label = data.training[
+                torch.nonzero(data.training[:, 0] == neighbor).squeeze(), 1]
+            elif neighbor in data.withheld[:, 0]:
+                neighbor_label = data.withheld[
+                    torch.nonzero(data.withheld[:, 0] == neighbor).squeeze(), 1]
+            else:
+                neighbor_label = y_train.max() + 1
+            graph.add_node(neighbor_name, label=label_dict[neighbor_label.item()], color='blue')
+    # Add second-hop neighbors
+    for neighbor in after_nodes_list[0]:
+        if neighbor not in after_nodes_list[1] and neighbor not in batch_node_idx_s:
+            neighbor_name = data.i2e[neighbor.item()][0].split('/')[-1].split('#')[-1]
+            if neighbor in data.training[:, 0]:
+                neighbor_label = data.training[
+                    torch.nonzero(data.training[:, 0] == neighbor).squeeze(), 1]
+            elif neighbor in data.withheld[:, 0]:
+                neighbor_label = data.withheld[
+                    torch.nonzero(data.withheld[:, 0] == neighbor).squeeze(), 1]
+            else:
+                neighbor_label = y_train.max() + 1
+            graph.add_node(neighbor_name, label=label_dict[neighbor_label.item()], color='green')
 
     for s, r, o in data.triples:
         if s in batch_node_idx_s or s in after_nodes_list[0] or s in after_nodes_list[1]:
