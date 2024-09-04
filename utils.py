@@ -446,19 +446,20 @@ def sampler_func(sampler, batch_id, num_nodes, num_rels, horizontal_en_A_tr, nor
         log_probs = 0
         log_z = 0
     elif sampler == 'grapes':
-        A_en_sliced, after_nodes_list, idx_per_rel_list, nonzero_rel_list, rels_more, log_probs, log_z = grapes_sampler(
-            batch_id,
-            samp_num_list,
-            num_nodes,
-            num_rels,
-            horizontal_en_A_tr,
-            depth,
-            sampler,
-            model_g,
-            model_z,
-            embed_X,
-            indicator_features,
-            device)
+        A_en_sliced, after_nodes_list, idx_per_rel_list, nonzero_rel_list, rels_more, log_probs, log_z, statistics = \
+            grapes_sampler(
+                batch_id,
+                samp_num_list,
+                num_nodes,
+                num_rels,
+                horizontal_en_A_tr,
+                depth,
+                sampler,
+                model_g,
+                model_z,
+                embed_X,
+                indicator_features,
+                device)
     elif sampler == 'LDUN':
         A_en_sliced, after_nodes_list, idx_per_rel_list, nonzero_rel_list, rels_more = ladies_norel_sampler(batch_id,
                                                                                                             samp_num_list,
@@ -506,7 +507,7 @@ def sampler_func(sampler, batch_id, num_nodes, num_rels, horizontal_en_A_tr, nor
         nonzero_rel_list = []
         log_probs = 0.
         log_z = 0.
-    return A_en_sliced, after_nodes_list, idx_per_rel_list, nonzero_rel_list, rels_more, log_probs, log_z
+    return A_en_sliced, after_nodes_list, idx_per_rel_list, nonzero_rel_list, rels_more, log_probs, log_z, statistics
 
 
 def adj_r_creator(edges, self_loop_dropout, num_nodes, num_rels, sampler):
@@ -531,6 +532,7 @@ def adj_r_creator(edges, self_loop_dropout, num_nodes, num_rels, sampler):
     hor_en_adj_tr = torch.sparse.FloatTensor(indices=hor_en_ind_tr.t(), values=vals_en_tr, size=hor_en_size_tr)
     hor_en_adj_ts = torch.sparse.FloatTensor(indices=hor_en_ind_ts.t(), values=vals_en_ts, size=hor_en_size_ts)
     norel_A_tr = []
+    norel_A_ts = []
     if sampler == 'LDUN':
         norel_ind_tr, norel_size_tr = adj_norel(edges_en_tr, num_nodes)
 
@@ -540,7 +542,15 @@ def adj_r_creator(edges, self_loop_dropout, num_nodes, num_rels, sampler):
         norel_A_tr = torch.sparse.FloatTensor(indices=norel_ind_tr.t(), values=norel_vals_en_tr,
                                               size=norel_size_tr)
 
-    return hor_en_adj_tr, hor_en_adj_ts, norel_A_tr
+        norel_ind_ts, norel_size_ts = adj_norel(edges_en_ts, num_nodes)
+
+        norel_vals_en_ts = torch.ones(norel_ind_ts.size(0), dtype=torch.float)
+        norel_vals_en_ts = norel_vals_en_ts / sum_sparse(norel_ind_ts, norel_vals_en_ts, norel_size_ts, True)
+
+        norel_A_ts = torch.sparse.FloatTensor(indices=norel_ind_ts.t(), values=norel_vals_en_ts,
+                                              size=norel_size_ts)
+
+    return hor_en_adj_tr, hor_en_adj_ts, norel_A_tr, norel_A_ts
 
 
 def sample_neighborhoods_from_probs(logits, A, num_samples, num_rels, test):
@@ -706,6 +716,7 @@ def grapes_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, s
     idx_per_rel_list = []
     non_zero_rel_list = []
     log_probs = []
+    stats = []
 
     for d in range(depth):
         neighbors = get_neighbours_sparse(A_en, previous_nodes)
@@ -733,7 +744,7 @@ def grapes_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, s
                 A_gf,
                 s_num,
             num_rels,
-            model_g.training)
+            not(model_g.training))
             log_probs.append(log_prob)
             # sample nodes given their probablity.
             # output the local and global idx of the neighbors, the probability of the nodes sampled
@@ -755,11 +766,13 @@ def grapes_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, s
         after_nodes_list.append(after_nodes)
         idx_list_per_rel_dev = [i.to(device) for i in idx_list_per_rel]
         idx_per_rel_list.append(idx_list_per_rel_dev)
+        stats.append(statistics)
         # non_zero_rel_list.append(nonzero_rels)
     A_en_sliced.reverse()
     after_nodes_list.reverse()
     idx_per_rel_list.reverse()
-    return A_en_sliced, after_nodes_list, idx_per_rel_list, non_zero_rel_list, 0, log_probs, log_z
+    stats.reverse()
+    return A_en_sliced, after_nodes_list, idx_per_rel_list, non_zero_rel_list, 0, log_probs, log_z, stats
 
 
 def ladies_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, sampler, device):

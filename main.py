@@ -118,7 +118,7 @@ def go(project="test", name='amplus50', data_name='amplus', batch_size=2048, fea
 
 
         # training
-        adj_tr, adj_ts, adj_norel_tr = adj_r_creator(data.triples, self_loop_dropout, data.num_entities, 2 * num_rels + 1, sampler)
+        adj_tr, adj_ts, adj_norel_tr, adj_norel_ts = adj_r_creator(data.triples, self_loop_dropout, data.num_entities, 2 * num_rels + 1, sampler)
 
         indicator_features = torch.zeros((data.num_entities, num_indicators))
         print('start training!')
@@ -144,7 +144,8 @@ def go(project="test", name='amplus50', data_name='amplus', batch_size=2048, fea
                     batch_y_train_s = batch_y_train[id_sorted]
                     indicator_features.zero_()
                     indicator_features[batch_node_idx_s, -1] = 1.0
-                    adj_tr_sliced, after_nodes_list, idx_per_rel_list, nonzero_rel_list, rels_more, log_probs, log_z = \
+                    adj_tr_sliced, after_nodes_list, idx_per_rel_list, nonzero_rel_list, rels_more, log_probs, log_z, \
+                        statistics = \
                         sampler_func(sampler,
                                                                                                            batch_node_idx_s,
                                                                                                            data.num_entities,
@@ -211,12 +212,16 @@ def go(project="test", name='amplus50', data_name='amplus', batch_size=2048, fea
                         tot_log_prob = 0.
                         cost_gfn = 0.
 
-                    log_dict = {'epoch': epoch,
+                    wandb.log({'epoch': epoch,
                                 'train_batch_loss_c': batch_loss_train,
                                 'train_batch_loss_g': batch_loss_g,
                                 'log_z': log_z,
                                 'log_probs': tot_log_prob,
-                                'diff': loss_coef * cost_gfn + tot_log_prob}
+                                'diff': loss_coef * cost_gfn + tot_log_prob})
+                    log_dict = {}
+                    for j, stat in enumerate(statistics):
+                        for key, value in stat.items():
+                            log_dict[f"{key}_{j}"] = value
                     wandb.log(log_dict)
 
                     loss_c += batch_loss_train
@@ -283,13 +288,13 @@ def go(project="test", name='amplus50', data_name='amplus', batch_size=2048, fea
                         batch_y_test_s = batch_y_test[id_sorted]
                         indicator_features.zero_()
                         indicator_features[batch_node_idx_s, -1] = 1.0
-                        adj_ts_sliced, after_nodes_list, idx_per_rel_list, nonzero_rel_list, rels_more, log_probs, log_z = \
+                        adj_ts_sliced, after_nodes_list, idx_per_rel_list, nonzero_rel_list, rels_more, log_probs, log_z, _ = \
                             sampler_func(sampler,
                                          batch_node_idx_s,
                                          data.num_entities,
                                          num_rels,
                                          adj_ts,
-                                         adj_norel_tr,
+                                         adj_norel_ts,
                                          [],
                                          samp_num_list,
                                          depth,
