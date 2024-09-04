@@ -472,6 +472,7 @@ def sampler_func(sampler, batch_id, num_nodes, num_rels, horizontal_en_A_tr, nor
                                                                                                             device)
         log_probs = 0.
         log_z = 0.
+        statistics = []
     elif sampler == "LDRN" or sampler == "LDRE":
         A_en_sliced, after_nodes_list, idx_per_rel_list, nonzero_rel_list, rels_more = ladies_sampler(batch_id,
                                                                                                       samp_num_list,
