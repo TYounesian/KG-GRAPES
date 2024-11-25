@@ -12,6 +12,7 @@ from PIL import ImageOps
 import time
 from torch.distributions import Bernoulli, Gumbel
 import networkx as nx
+import matplotlib.pyplot as plt
 
 
 def d(tensor=None):
@@ -1302,12 +1303,13 @@ def plot_graph(batch_node_idx_s, data, after_nodes_list, batch_out_train, batch_
 
     # Extract node colors
     node_colors = [data['color'] for _, data in graph.nodes(data=True)]
-
+    edge_colors = [data['color'] for _, _, data in graph.edges(data=True)]
+    plt.figure()
     # Draw nodes
     nx.draw_networkx_nodes(graph, pos, node_color=node_colors, node_size=500)
 
     # Draw edges
-    nx.draw_networkx_edges(graph, pos, arrows=True)
+    nx.draw_networkx_edges(graph, pos, arrows=True, edge_color=edge_colors)
 
     # Draw node labels
     node_labels = {node: f"{node} ({data['label']})" for node, data in graph.nodes(data=True)}
@@ -1315,4 +1317,5 @@ def plot_graph(batch_node_idx_s, data, after_nodes_list, batch_out_train, batch_
 
     # Draw edge labels
     edge_labels = nx.get_edge_attributes(graph, 'label')
-    nx.draw_networkx_edge_labels(graph, pos, edge_labels=edge_labels, font_size=5, font_color='gray')
+    nx.draw_networkx_edge_labels(graph, pos, edge_labels=edge_labels, font_size=5, font_color='grey')
+    plt.show()

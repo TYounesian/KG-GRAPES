@@ -18,7 +18,7 @@ from utils import *
 # from memory_profiler import profile
 #
 # @profile
-
+from datetime import datetime
 
 def go(project="test", name='amplus50', data_name='amplus', batch_size=2048, feat_size=16, num_epochs=50, modality='no',
        l2=5e-4, lr_c=0.01, lr_d=0, lr_g=0.01, loss_coef=1e4, log_z_init=0., use_indicators=True, prune=True, final=True,
@@ -122,6 +122,10 @@ def go(project="test", name='amplus50', data_name='amplus', batch_size=2048, fea
 
         indicator_features = torch.zeros((data.num_entities, num_indicators))
         print('start training!')
+        current_time = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+        folder = f'sampled_{current_time}'
+        if not os.path.exists(folder):
+            os.makedirs(folder)
         for epoch in range(0, num_epochs):
             loss_c = 0
             loss_g = 0
@@ -228,16 +232,16 @@ def go(project="test", name='amplus50', data_name='amplus', batch_size=2048, fea
                     loss_g += batch_loss_g
                     acc += batch_acc_train
                     num_nodes_list.append(len(nodes_needed))
-                    # total_num_edges += num_edges
                     total_rels_more += rels_more
-                    draw = False
-                    # if epoch == num_epochs - 1 and draw:
+                    draw = True
+                    if epoch == num_epochs-1 and draw:
                         # plot_graph(batch_node_idx_s, data, after_nodes_list, batch_out_train, batch_y_train_s,
                         # y_train)
-                        # sampled_dict = {'targets': batch_node_idx_s, 'after_nodes_list': after_nodes_list,
-                        #                 'out': batch_out_train, 'batch_y': batch_y_train_s}
-                        # with open(f"{data_name}_sampled_train{batch_id}.pkl", 'wb') as f:
-                        #     pkl.dump(sampled_dict, f)
+                        file_path = os.path.join(folder, f'{data_name}_sampled_train_epoch{epoch}_batch{batch_id}.pkl')
+                        sampled_dict = {'targets': batch_node_idx_s, 'after_nodes_list': after_nodes_list,
+                                        'out': batch_out_train, 'batch_y': batch_y_train_s}
+                        with open(file_path, 'wb') as f:
+                            pkl.dump(sampled_dict, f)
 
                     layers_c = [model_c.batch_rgcn.comp1.to('cpu'), model_c.batch_rgcn.comp2.to('cpu')]
                     with open(f"{data_name}_comps.pkl", 'wb') as f:
