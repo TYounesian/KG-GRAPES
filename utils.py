@@ -13,6 +13,7 @@ import time
 from torch.distributions import Bernoulli, Gumbel
 import networkx as nx
 import matplotlib.pyplot as plt
+import math
 
 
 def d(tensor=None):
@@ -438,7 +439,7 @@ def get_splits(y, train_idx, test_idx, validation=True):
 
 
 def sampler_func(sampler, batch_id, num_nodes, num_rels, horizontal_en_A_tr, norel_A_tr, A_sep, samp_num_list, depth,
-            model_g, model_z, embed_X, indicator_features, device):
+            model_g, model_z, embed_X, indicator_features, current_e, start_e, end_e, device):
     if sampler == 'full-mini-batch':
         A_en_sliced, after_nodes_list, rels_more = full_mini_sampler(batch_id, num_nodes,
                                                                      num_rels, horizontal_en_A_tr, depth, device)
@@ -460,6 +461,9 @@ def sampler_func(sampler, batch_id, num_nodes, num_rels, horizontal_en_A_tr, nor
                 model_z,
                 embed_X,
                 indicator_features,
+                current_e,
+                start_e,
+                end_e,
                 device)
     elif sampler == 'LDUN':
         A_en_sliced, after_nodes_list, idx_per_rel_list, nonzero_rel_list, rels_more = ladies_norel_sampler(batch_id,
@@ -555,7 +559,7 @@ def adj_r_creator(edges, self_loop_dropout, num_nodes, num_rels, sampler):
     return hor_en_adj_tr, hor_en_adj_ts, norel_A_tr, norel_A_ts
 
 
-def sample_neighborhoods_from_probs(logits, A, num_samples, num_rels, test):
+def sample_neighborhoods_from_probs(logits, A, num_samples, num_rels, test, current_e, start_e, end_e):
     """Remove edges from an edge index, by removing nodes according to some
     probability.
 
@@ -581,7 +585,13 @@ def sample_neighborhoods_from_probs(logits, A, num_samples, num_rels, test):
     # Gumbel-sort trick https://timvieira.github.io/blog/post/2014/08/01/gumbel-max-trick-and-weighted-reservoir-sampling/
     gumbel = Gumbel(torch.tensor(0., device=logits.device), torch.tensor(1., device=logits.device))
     gumbel_noise = gumbel.sample((n,))
-    perturbed_log_probs = b.probs.log() + gumbel_noise
+    if current_e < start_e:
+        perturbed_log_probs = b.probs.log() + gumbel_noise
+    else:
+        decay = math.log(1 / 1e-6) / (end_e - start_e)
+        gumbel_noise = gumbel_noise * math.exp(-decay * (current_e - start_e))
+        print(f'gumbel noise: {gumbel_noise} at epoch {current_e}')
+        perturbed_log_probs = b.probs.log() + gumbel_noise
     if test:
         samples = torch.topk(b.probs, k=k, dim=0, sorted=False)[1].to('cpu')
     else:
@@ -710,7 +720,7 @@ def fastgcn_plus_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, de
 
 
 def grapes_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, sampler, model_g, model_z, embed_X,
-                   indicator_features, device):
+                   indicator_features, current_e, start_e, end_e, device):
     previous_nodes = batch_idx
     col_ind = []
     A_en_sliced = []
@@ -746,7 +756,10 @@ def grapes_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, s
                 A_gf,
                 s_num,
             num_rels,
-            not(model_g.training))
+            not(model_g.training),
+            current_e,
+            start_e,
+            end_e)
             log_probs.append(log_prob)
             # sample nodes given their probablity.
             # output the local and global idx of the neighbors, the probability of the nodes sampled

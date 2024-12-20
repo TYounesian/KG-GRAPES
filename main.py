@@ -127,6 +127,7 @@ def go(project="test", name='amplus50', data_name='amplus', batch_size=2048, fea
         if not os.path.exists(folder):
             os.makedirs(folder)
         for epoch in range(0, num_epochs):
+            start_e = num_epochs - np.ceil(num_epochs/4)
             loss_c = 0
             loss_g = 0
             acc = 0
@@ -163,6 +164,9 @@ def go(project="test", name='amplus50', data_name='amplus', batch_size=2048, fea
                                                                                                            model_z,
                                                                                                            embed_X,
                                                                                                            indicator_features,
+                                                                                                           epoch,
+                                                                                                           start_e,
+                                                                                                           num_epochs,
                                                                                                            device)
                     nodes_needed = [i for j in after_nodes_list for i in j]
                     nodes_needed = torch.unique(torch.tensor(nodes_needed, dtype=torch.int64, device=device))
@@ -306,6 +310,9 @@ def go(project="test", name='amplus50', data_name='amplus', batch_size=2048, fea
                                          model_z,
                                          embed_X,
                                          indicator_features,
+                                         epoch,
+                                         start_e,
+                                         num_epochs,
                                          device)
 
                         batch_out_test, _ = model_c(embed_X, adj_ts_sliced,
