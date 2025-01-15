@@ -589,7 +589,7 @@ def sample_neighborhoods_from_probs(logits, A, num_samples, num_rels, test, curr
         perturbed_log_probs = b.probs.log() + gumbel_noise
     else:
         decay = math.log(1 / 1e-6) / (end_e - start_e)
-        gumbel_noise = gumbel_noise * math.exp(-decay * (current_e - start_e))
+        gumbel_noise = gumbel_noise * math.exp(-decay * (current_e - start_e + 1))
         print(f'gumbel noise: {gumbel_noise} at epoch {current_e}')
         perturbed_log_probs = b.probs.log() + gumbel_noise
     if test:
@@ -1027,6 +1027,9 @@ def sel_idx_node(pp, s_num, num_nodes, num_rels): #TODO: vectorize?
     r = len(filtered_p)//num_nodes
     p_2d = torch.reshape(filtered_p, (r, num_nodes))
     print(torch.count_nonzero(p_2d, dim=1))
+    # Turning LDRN to LARN
+    # if torch.count_nonzero(p_2d, dim=1) > 0:
+    #     p_2d[p_2d != 0.0] = 1 / torch.count_nonzero(p_2d, dim=1)
     # percentage of the rels that have more nonzero degree nodes than the sample size
     rels_more_s_num = sum(torch.count_nonzero(p_2d, dim=1) > s_num)/len(non_zero_rels)*100
     s_n = torch.minimum(torch.mul(torch.ones(r), s_num), torch.count_nonzero(p_2d, dim=1))

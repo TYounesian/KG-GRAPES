@@ -20,20 +20,20 @@ from utils import *
 # @profile
 from datetime import datetime
 
-def go(project="test", name='amplus50', data_name='amplus', batch_size=2048, feat_size=16, num_epochs=50, modality='no',
+def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_epochs=50, modality='no',
        l2=5e-4, lr_c=0.01, lr_d=0, lr_g=0.01, loss_coef=1e4, log_z_init=0., use_indicators=True, prune=True, final=True,
        embed_size=16, bases=40, sampler='LDRN', depth=2, samp0=2048, self_loop_dropout=0, test_state='full',
        testing=True, saving=False, repeat=5, lr_embed=0, log_wandb=False):
 
     config = {
-        "project": project, "name": name, "data_name": data_name, "batch_size": batch_size, "feat_size": feat_size,
+        "project": project, "data_name": data_name, "batch_size": batch_size, "feat_size": feat_size,
         "num_epochs": num_epochs, "modality": modality, "l2": l2, "lr_c": lr_c, "lr_d": lr_d, "lr_g": lr_g, 'loss_coef': loss_coef,
         "prune": prune, "final": final, "embed_size": embed_size, "bases": bases, "sampler": sampler, "depth": depth,
         "samp0": samp0, "self_loop_dropout": self_loop_dropout, "test_state": test_state, "testing": testing,
         "saving": saving, "repeat": repeat, "lr_embed": lr_embed
     }
 
-    wandb.init(project=project, entity='tyou', name=name, mode='online' if log_wandb else 'disabled', config=config)
+    wandb.init(project=project, entity='tyou', mode='online' if log_wandb else 'disabled', config=config)
 
     if os.path.isfile(f"data_{data_name}_final_{final}.pkl"):
         print(f'Using cached data {data_name}.')
@@ -136,6 +136,7 @@ def go(project="test", name='amplus50', data_name='amplus', batch_size=2048, fea
             total_rels_more = 0
             if batch_size > 0:
                 model_c.train()
+                model_g.train()
                 for batch_id in range(0, train_num_batches):
                     start = time.time()
                     if batch_id == train_num_batches-1:
@@ -248,7 +249,7 @@ def go(project="test", name='amplus50', data_name='amplus', batch_size=2048, fea
                             pkl.dump(sampled_dict, f)
 
                     layers_c = [model_c.batch_rgcn.comp1.to('cpu'), model_c.batch_rgcn.comp2.to('cpu')]
-                    with open(f"{data_name}_comps.pkl", 'wb') as f:
+                    with open(f"train_{data_name}_comps.pkl", 'wb') as f:
                         pkl.dump(layers_c, f)
 
                 epoch_tr_loss_c = loss_c/train_num_batches
@@ -327,6 +328,20 @@ def go(project="test", name='amplus50', data_name='amplus', batch_size=2048, fea
 
                         loss += batch_loss_test
                         acc += batch_acc_test
+
+                        if epoch == num_epochs - 1 and draw:
+                            # plot_graph(batch_node_idx_s, data, after_nodes_list, batch_out_train, batch_y_train_s,
+                            # y_train)
+                            file_path = os.path.join(folder,
+                                                     f'{data_name}_sampled_test_epoch{epoch}_batch{batch_id}.pkl')
+                            sampled_dict = {'targets': batch_node_idx_s, 'after_nodes_list': after_nodes_list,
+                                            'out': batch_out_train, 'batch_y': batch_y_train_s}
+                            with open(file_path, 'wb') as f:
+                                pkl.dump(sampled_dict, f)
+
+                        layers_c = [model_c.batch_rgcn.comp1.to('cpu'), model_c.batch_rgcn.comp2.to('cpu')]
+                        with open(f"test_{data_name}_comps.pkl", 'wb') as f:
+                            pkl.dump(layers_c, f)
 
                     loss_test = loss / test_num_batches
                     acc_test = acc / test_num_batches
