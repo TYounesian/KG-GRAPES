@@ -128,9 +128,12 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
             os.makedirs(folder)
         for epoch in range(0, num_epochs):
             start_e = num_epochs - np.ceil(num_epochs/4)
+            pert = False
+            pert_ratio = 0.25
             loss_c = 0
             loss_g = 0
             acc = 0
+            necessity = 0
             num_nodes_list = list()
             total_num_edges = 0
             total_rels_more = 0
@@ -151,7 +154,7 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
                     indicator_features.zero_()
                     indicator_features[batch_node_idx_s, -1] = 1.0
                     adj_tr_sliced, after_nodes_list, idx_per_rel_list, nonzero_rel_list, rels_more, log_probs, log_z, \
-                        statistics = \
+                        statistics, adj_tr_pert, after_nodes_list_pert = \
                         sampler_func(sampler,
                                                                                                            batch_node_idx_s,
                                                                                                            data.num_entities,
@@ -168,18 +171,25 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
                                                                                                            epoch,
                                                                                                            start_e,
                                                                                                            num_epochs,
+                                                                                                           pert,
+                                                                                                           pert_ratio,
                                                                                                            device)
+
                     nodes_needed = [i for j in after_nodes_list for i in j]
                     nodes_needed = torch.unique(torch.tensor(nodes_needed, dtype=torch.int64, device=device))
                     print("Computing embeddings for: ", len(nodes_needed), "out of ", data.num_entities)
-                    # calculate how many nodes per data type:
-                    # for datatype in data.datatypes():
-                    #     n = len(data.get_strings_batch(nodes_needed, dtype=datatype))
-                    #     print(f'number of nodes with {datatype} datatype: {n}')
 
                     batch_out_train, nodes_in_rels = model_c(embed_X, adj_tr_sliced,
                                                             after_nodes_list, idx_per_rel_list,
                                                             nonzero_rel_list, test_state, device)
+                    if pert:
+                        batch_out_train_pert, _ = model_c(embed_X, adj_tr_pert,
+                                                                 after_nodes_list_pert, idx_per_rel_list,
+                                                                 nonzero_rel_list, test_state, device)
+                        with torch.no_grad():
+                            batch_acc_train_pert = (batch_out_train_pert.argmax(dim=1) == batch_y_train_s).sum().item() / len(
+                                batch_y_train_s) * 100
+                            necessity = sum(batch_out_train - batch_out_train_pert)/len(batch_out_train)
 
                     if save_model_info and epoch == 0:
                         if batch_id == 0:
@@ -202,7 +212,7 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
                         batch_acc_train = (batch_out_train.argmax(dim=1) == batch_y_train_s).sum().item()/len(batch_y_train_s) * 100
                     print(f'train batch time ({time.time() - start:.4}s).')
                     print(f'Repeat: {i}, Training Epoch: {epoch}, batch number: {batch_id}/{train_num_batches}, '
-                          f'Accuracy: {batch_acc_train}')
+                          f'Accuracy: {batch_acc_train}, necessity: {necessity}')
 
                     batch_loss_train.backward()
                     optimizer_c.step()
@@ -271,10 +281,10 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
 
                 # Saving the model
                 if saving and (epoch % (num_epochs//3) == (num_epochs//3 - 1) or epoch == (num_epochs-1)):
-                    save_filename = f'model_bsize%s_{name}_%s.pth' % (batch_size, epoch)
+                    save_filename = f'model_bsize%s_{data_name}_%s.pth' % (batch_size, epoch)
                     save_path = os.path.join('./savedModels', save_filename)
                     torch.save(model_c.state_dict(), save_path)
-                    embed_file_name = f'embeddings_bsize%s_{name}_%s.pkl' %(batch_size, epoch)
+                    embed_file_name = f'embeddings_bsize%s_{data_name}_%s.pkl' %(batch_size, epoch)
                     save_path = os.path.join('./savedModels', embed_file_name)
                     with open(save_path, 'wb') as f:
                         pkl.dump(embed_X, f)
@@ -297,8 +307,8 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
                         batch_y_test_s = batch_y_test[id_sorted]
                         indicator_features.zero_()
                         indicator_features[batch_node_idx_s, -1] = 1.0
-                        adj_ts_sliced, after_nodes_list, idx_per_rel_list, nonzero_rel_list, rels_more, log_probs, log_z, _ = \
-                            sampler_func(sampler,
+                        adj_ts_sliced, after_nodes_list, idx_per_rel_list, nonzero_rel_list, rels_more, log_probs, \
+                        log_z, _, _, _ = sampler_func(sampler,
                                          batch_node_idx_s,
                                          data.num_entities,
                                          num_rels,
@@ -314,6 +324,8 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
                                          epoch,
                                          start_e,
                                          num_epochs,
+                                         False,
+                                         pert_ratio,
                                          device)
 
                         batch_out_test, _ = model_c(embed_X, adj_ts_sliced,
@@ -355,15 +367,6 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
 
                 epoch_ts_loss = loss_test.detach()
                 epoch_ts_acc = acc_test
-
-                # saving the max acc and min loss
-                # if i == 0:
-                #     if epoch_ts_acc > test_max_acc:
-                #         test_max_acc = epoch_ts_acc
-                #         wandb.run.summary["best_test_accuracy"] = epoch_ts_acc
-                #     if epoch_ts_loss < test_min_loss:
-                #         test_min_loss = epoch_ts_loss
-                #         wandb.run.summary["best_test_loss"] = epoch_ts_loss
 
                 print("Repeat", i, ", Epoch ", epoch, " final Test Accuracy: ", epoch_ts_acc,
                       "And Loss: ", epoch_ts_loss.item())
