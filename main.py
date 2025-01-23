@@ -127,13 +127,14 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
         if not os.path.exists(folder):
             os.makedirs(folder)
         for epoch in range(0, num_epochs):
-            start_e = num_epochs - np.ceil(num_epochs/4)
-            pert = False
+            start_e = 0
+            pert = True
             pert_ratio = 0.25
             loss_c = 0
             loss_g = 0
             acc = 0
             necessity = 0
+            batch_acc_train_pert = 0
             num_nodes_list = list()
             total_num_edges = 0
             total_rels_more = 0
@@ -182,7 +183,7 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
                     batch_out_train, nodes_in_rels = model_c(embed_X, adj_tr_sliced,
                                                             after_nodes_list, idx_per_rel_list,
                                                             nonzero_rel_list, test_state, device)
-                    if pert:
+                    if pert and epoch == num_epochs - 1 :
                         batch_out_train_pert, _ = model_c(embed_X, adj_tr_pert,
                                                                  after_nodes_list_pert, idx_per_rel_list,
                                                                  nonzero_rel_list, test_state, device)
@@ -212,7 +213,7 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
                         batch_acc_train = (batch_out_train.argmax(dim=1) == batch_y_train_s).sum().item()/len(batch_y_train_s) * 100
                     print(f'train batch time ({time.time() - start:.4}s).')
                     print(f'Repeat: {i}, Training Epoch: {epoch}, batch number: {batch_id}/{train_num_batches}, '
-                          f'Accuracy: {batch_acc_train}, necessity: {necessity}')
+                          f'Accuracy: {batch_acc_train}, necessity: {necessity}, Acc train pert: {batch_acc_train_pert}')
 
                     batch_loss_train.backward()
                     optimizer_c.step()

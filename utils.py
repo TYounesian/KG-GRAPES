@@ -754,18 +754,18 @@ def grapes_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, s
         neighbors = get_neighbours_sparse(A_en, previous_nodes)
         mask = ~torch.isin(neighbors, previous_nodes)
         only_neighbors = neighbors[mask]
-        cols = getAdjacencyNodeColumnIdx(only_neighbors, num_nodes, 2*num_rels+1)
+        cols = getAdjacencyNodeColumnIdx(previous_nodes, num_nodes, 2*num_rels+1)
         # A_en_row = slice_rows_tensor2(A_en, previous_nodes)
-        A_gf = slice_adj_row_col(A_en, only_neighbors, cols, len(only_neighbors), len(only_neighbors), 'cl')
+        A_gf = slice_adj_row_col(A_en, neighbors, cols, len(neighbors), len(previous_nodes), 'prob')
         # calculate the importance of each neighbor
         indicator_features[neighbors, d] = 1.0
         # batch_nodes = neighbors[~torch.isin(neighbors, previous_nodes)]
-        x = torch.cat([embed_X[only_neighbors],
-                    indicator_features[only_neighbors]],
+        x = torch.cat([embed_X[neighbors],
+                    indicator_features[neighbors]],
                     dim=1)
-        node_logits, _ = model_g(x, A_gf.to(device), only_neighbors, [], [], 'full', device)
+        node_logits, _ = model_g(x, A_gf.to(device), neighbors, [], [], 'full', device)
         if d == 0:
-            pred_z, _ = model_z(embed_X[only_neighbors], A_gf.to(device), only_neighbors, [], [], 'full', device)
+            pred_z, _ = model_z(embed_X[neighbors], A_gf.to(device), neighbors, [], [], 'full', device)
             log_z = pred_z.mean()
         num_prev_nodes = len(previous_nodes)
         # calculate the probability of sampling each neighbor in each relation
@@ -788,7 +788,7 @@ def grapes_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, s
             # idx_local, nonzero_rels, global_idx, prob, rels_more = sel_idx_node(p, s_num, num_nodes, num_rels)
             idx_list_per_rel = []
 
-            after_nodes = only_neighbors[idx_local]  # unique node idx
+            after_nodes = neighbors[idx_local]  # unique node idx
         else:
             after_nodes = batch_idx
         # unique node idx with aggregation
