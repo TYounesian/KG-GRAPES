@@ -596,6 +596,9 @@ def sample_neighborhoods_from_probs(logits, A, num_samples, num_rels, test, curr
     assert k < n
     assert k > 0
 
+    # shuffle logits
+    shuffle_idx = torch.randperm(logits.size(0))
+    logits = logits[shuffle_idx]
     b = Bernoulli(logits=logits.squeeze())
 
     # Gumbel-sort trick https://timvieira.github.io/blog/post/2014/08/01/gumbel-max-trick-and-weighted-reservoir-sampling/
@@ -605,14 +608,24 @@ def sample_neighborhoods_from_probs(logits, A, num_samples, num_rels, test, curr
         perturbed_log_probs = b.probs.log() + gumbel_noise
     else:
         decay = math.log(1 / 1e-6) / (end_e - start_e)
-        gumbel_noise = gumbel_noise * math.exp(-decay * (current_e - start_e + 1))
+        gumbel_noise = gumbel_noise * math.exp(-decay * (current_e - start_e + 1)) #* b.probs.log().std()
         print(f'gumbel noise: {gumbel_noise} at epoch {current_e}')
         perturbed_log_probs = b.probs.log() + gumbel_noise
     if test:
         samples = torch.topk(b.probs, k=k, dim=0, sorted=False)[1].to('cpu')
+        # samples = torch.arange(k)
     else:
         samples = torch.topk(perturbed_log_probs, k=k, dim=0, sorted=False)[1].to('cpu')
 
+    # shuffle back
+    samples = shuffle_idx[samples]
+
+    print("shared between probs and perturbed:",
+          len(set(torch.topk(b.probs, k=k, dim=0, sorted=False)[1].to('cpu').tolist()) &
+              set(torch.topk(perturbed_log_probs, k=k, dim=0, sorted=False)[1].to('cpu').tolist())))
+    print("shared between noise and perturbed:",
+          len(set(torch.topk(gumbel_noise, k=k, dim=0, sorted=False)[1].to('cpu').tolist()) &
+              set(torch.topk(perturbed_log_probs, k=k, dim=0, sorted=False)[1].to('cpu').tolist())))
     # calculate the entropy in bits
     entropy = -(b.probs * (b.probs).log2() + (1 - b.probs) * (1 - b.probs).log2())
 
@@ -787,7 +800,6 @@ def grapes_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, s
             # output the local and global idx of the neighbors, the probability of the nodes sampled
             # idx_local, nonzero_rels, global_idx, prob, rels_more = sel_idx_node(p, s_num, num_nodes, num_rels)
             idx_list_per_rel = []
-
             after_nodes = neighbors[idx_local]  # unique node idx
         else:
             after_nodes = batch_idx
@@ -905,7 +917,6 @@ def ladies_norel_sampler(batch_idx, samp_num_list, num_nodes, num_rels, nore_A, 
         p = pi/sum_pi
         s_num = samp_num_list[d]
         if s_num > 0:
-            start = time.time()
             if sampler == 'LDRN' or sampler == 'LDUN':
                 # node sampling by ReWise: including all the relations of a node
                 # sample nodes given their probablity.

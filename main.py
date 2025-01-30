@@ -76,7 +76,6 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
     for i in range(repeat):
         if modality == 'all':  # multimodal (MRGCN)
             embed_X = extract_embeddings(data, feat_size)
-
         else:  # If RGCN
             embed_X = nn.Parameter(torch.FloatTensor(data.num_entities, feat_size), requires_grad=True)
             # nn.init.xavier_uniform_(embed_X, gain=nn.init.calculate_gain('relu'))
@@ -111,11 +110,8 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
             if sampler == 'grapes':
                 # log_z = torch.tensor(log_z_init, requires_grad=True)
                 optimizer_g = torch.optim.Adam(list(model_g.parameters()) + list(model_z.parameters()), lr=lr_g, weight_decay=0)
-            else:
-                log_z = 0.
         else:
             optimizer_c = torch.optim.Adam(model_c.parameters(), lr=lr_c, weight_decay=0)
-
 
         # training
         adj_tr, adj_ts, adj_norel_tr, adj_norel_ts = adj_r_creator(data.triples, self_loop_dropout, data.num_entities, 2 * num_rels + 1, sampler)
@@ -124,11 +120,17 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
         print('start training!')
         current_time = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
         folder = f'sampled_{current_time}'
-        if not os.path.exists(folder):
-            os.makedirs(folder)
+        # if not os.path.exists(folder):
+        #     os.makedirs(folder)
+
+        # shuffle
+        shuffle_idx = torch.randperm(train_idx.size(0))
+        train_idx = train_idx[shuffle_idx]
+        y_train = y_train[shuffle_idx]
+
         for epoch in range(0, num_epochs):
             start_e = 0
-            pert = True
+            pert = False
             pert_ratio = 0.25
             loss_c = 0
             loss_g = 0
@@ -249,10 +251,8 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
                     acc += batch_acc_train
                     num_nodes_list.append(len(nodes_needed))
                     total_rels_more += rels_more
-                    draw = True
+                    draw = False
                     if epoch == num_epochs-1 and draw:
-                        # plot_graph(batch_node_idx_s, data, after_nodes_list, batch_out_train, batch_y_train_s,
-                        # y_train)
                         file_path = os.path.join(folder, f'{data_name}_sampled_train_epoch{epoch}_batch{batch_id}.pkl')
                         sampled_dict = {'targets': batch_node_idx_s, 'after_nodes_list': after_nodes_list,
                                         'out': batch_out_train, 'batch_y': batch_y_train_s}
