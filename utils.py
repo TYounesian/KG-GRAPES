@@ -617,7 +617,7 @@ def sample_neighborhoods_from_probs(logits, A, num_samples, num_rels, test, curr
         # min_noise = 1e-3
         # gumbel_noise = gumbel_noise * tau + min_noise
         # print(f'gumbel noise: {gumbel_noise} at epoch {current_e}')
-        perturbed_log_probs = b.probs.log() + torch.rand(n)*1e-2 #+ gumbel_noise
+        perturbed_log_probs = b.probs.log() + torch.rand(n, device=logits.device)*1e-2 #+ gumbel_noise
     if test:
         samples = torch.topk(b.probs, k=k, dim=0, sorted=False)[1].to('cpu')#torch.topk(b.probs+torch.rand(n)*1e-2, k=k, dim=0, sorted=False)[1].to('cpu')
         # samples = torch.arange(k)
