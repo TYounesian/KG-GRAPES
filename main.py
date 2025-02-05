@@ -123,10 +123,10 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
         # if not os.path.exists(folder):
         #     os.makedirs(folder)
 
-        # shuffle
-        shuffle_idx = torch.randperm(train_idx.size(0))
-        train_idx = train_idx[shuffle_idx]
-        y_train = y_train[shuffle_idx]
+        # # shuffle
+        # shuffle_idx = torch.randperm(train_idx.size(0))
+        # train_idx = train_idx[shuffle_idx]
+        # y_train = y_train[shuffle_idx]
 
         for epoch in range(0, num_epochs):
             start_e = 0

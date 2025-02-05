@@ -599,26 +599,37 @@ def sample_neighborhoods_from_probs(logits, A, num_samples, num_rels, test, curr
     # shuffle logits
     shuffle_idx = torch.randperm(logits.size(0))
     logits = logits[shuffle_idx]
+    test = True
     b = Bernoulli(logits=logits.squeeze())
-
     # Gumbel-sort trick https://timvieira.github.io/blog/post/2014/08/01/gumbel-max-trick-and-weighted-reservoir-sampling/
     gumbel = Gumbel(torch.tensor(0., device=logits.device), torch.tensor(1., device=logits.device))
     gumbel_noise = gumbel.sample((n,))
     if current_e < start_e:
         perturbed_log_probs = b.probs.log() + gumbel_noise
     else:
-        decay = math.log(1 / 1e-6) / (end_e - start_e)
-        gumbel_noise = gumbel_noise * math.exp(-decay * (current_e - start_e + 1)) #* b.probs.log().std()
-        print(f'gumbel noise: {gumbel_noise} at epoch {current_e}')
-        perturbed_log_probs = b.probs.log() + gumbel_noise
+        # decay = math.log(1 / 1e-6) / (end_e - start_e)
+        # gumbel_noise = gumbel_noise * math.exp(-decay * (current_e - start_e + 1)) #* b.probs.log().std()
+        # tau = 0.1 #1 - (current_e - start_e) / (end_e - start_e)
+        # if current_e > end_e/4:
+        #     tau = 0.01
+        # if current_e > end_e/2:
+        #     tau = 0.005
+        # min_noise = 1e-3
+        # gumbel_noise = gumbel_noise * tau + min_noise
+        # print(f'gumbel noise: {gumbel_noise} at epoch {current_e}')
+        perturbed_log_probs = b.probs.log() + torch.rand(n)*1e-2 #+ gumbel_noise
     if test:
-        samples = torch.topk(b.probs, k=k, dim=0, sorted=False)[1].to('cpu')
+        samples = torch.topk(b.probs, k=k, dim=0, sorted=False)[1].to('cpu')#torch.topk(b.probs+torch.rand(n)*1e-2, k=k, dim=0, sorted=False)[1].to('cpu')
         # samples = torch.arange(k)
     else:
         samples = torch.topk(perturbed_log_probs, k=k, dim=0, sorted=False)[1].to('cpu')
 
+    print("probs:", b.probs[samples])
+    print("samples:", samples)
+
     # shuffle back
     samples = shuffle_idx[samples]
+    # print("samples:", samples)
 
     print("shared between probs and perturbed:",
           len(set(torch.topk(b.probs, k=k, dim=0, sorted=False)[1].to('cpu').tolist()) &
@@ -766,7 +777,7 @@ def grapes_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, s
     for d in range(depth):
         neighbors = get_neighbours_sparse(A_en, previous_nodes)
         mask = ~torch.isin(neighbors, previous_nodes)
-        only_neighbors = neighbors[mask]
+        # only_neighbors = neighbors[mask]
         cols = getAdjacencyNodeColumnIdx(previous_nodes, num_nodes, 2*num_rels+1)
         # A_en_row = slice_rows_tensor2(A_en, previous_nodes)
         A_gf = slice_adj_row_col(A_en, neighbors, cols, len(neighbors), len(previous_nodes), 'prob')
@@ -801,8 +812,23 @@ def grapes_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, s
             # idx_local, nonzero_rels, global_idx, prob, rels_more = sel_idx_node(p, s_num, num_nodes, num_rels)
             idx_list_per_rel = []
             after_nodes = neighbors[idx_local]  # unique node idx
+            print("after nodes:", torch.unique(after_nodes))
         else:
             after_nodes = batch_idx
+
+        # A_row = slice_rows_tensor2(nore_A, previous_nodes)
+        # A_en_row = slice_rows_tensor2(A_en, previous_nodes)
+        # size = [len(previous_nodes), num_nodes]
+        # pi = calc_prob(A_row, size, 1, device)
+        # num_prev_nodes = len(previous_nodes)
+        # sum_pi = pi.sum()
+        # p = pi / sum_pi
+        # s_num = samp_num_list[d]
+        # if s_num > 0:
+        #     idx_local, nonzero_rels, global_idx, prob, rels_more = sel_idx_node(p, s_num, num_nodes, 1)
+        #     idx_list_per_rel = []
+        #     after_nodes = idx_local  # unique node idx
+
         # unique node idx with aggregation
         after_nodes = torch.unique(torch.cat((after_nodes, batch_idx.to('cpu'))))
         if pert:
@@ -821,6 +847,9 @@ def grapes_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, s
         # A_en_sliced.append(slice_adj_col(A_en_row, col_ind, 2 * num_rels + 1, num_prev_nodes, sampler, after_nodes,
         #                                  len(after_nodes), [], []).to(device))
         A_en_sliced.append(slice_adj_row_col(A_en, previous_nodes, cols, num_prev_nodes, len(after_nodes), 'cl').to(device))
+        # A_en_sliced.append(slice_adj_col(A_en_row, col_ind, 2 * num_rels + 1, num_prev_nodes, sampler, after_nodes,
+        #                                  len(after_nodes), global_idx, prob).to(device))
+
         previous_nodes = after_nodes
 
         after_nodes_list.append(after_nodes)
