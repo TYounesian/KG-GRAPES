@@ -575,7 +575,7 @@ def adj_r_creator(edges, self_loop_dropout, num_nodes, num_rels, sampler):
     return hor_en_adj_tr, hor_en_adj_ts, norel_A_tr, norel_A_ts
 
 
-def sample_neighborhoods_from_probs(logits, A, num_samples, num_rels, test, current_e, start_e, end_e):
+def sample_neighborhoods_from_probs(logits, num_samples, test, current_e, start_e, end_e):
     """Remove edges from an edge index, by removing nodes according to some
     probability.
 
@@ -589,7 +589,7 @@ def sample_neighborhoods_from_probs(logits, A, num_samples, num_rels, test, curr
     """
 
     k = num_samples
-    n = A.shape[1] // (2*num_rels+1)
+    n = logits.size(0)
     if k >= n:
         logprobs = torch.nn.functional.logsigmoid(logits.squeeze(-1))
         return torch.arange(0, len(logits)), logprobs, {}
@@ -597,8 +597,8 @@ def sample_neighborhoods_from_probs(logits, A, num_samples, num_rels, test, curr
     assert k > 0
 
     # shuffle logits
-    shuffle_idx = torch.randperm(logits.size(0))
-    logits = logits[shuffle_idx]
+    # shuffle_idx = torch.randperm(logits.size(0))
+    # logits = logits[shuffle_idx]
     test = True
     b = Bernoulli(logits=logits.squeeze())
     # Gumbel-sort trick https://timvieira.github.io/blog/post/2014/08/01/gumbel-max-trick-and-weighted-reservoir-sampling/
@@ -624,11 +624,11 @@ def sample_neighborhoods_from_probs(logits, A, num_samples, num_rels, test, curr
     else:
         samples = torch.topk(perturbed_log_probs, k=k, dim=0, sorted=False)[1].to('cpu')
 
-    print("probs:", b.probs[samples])
-    print("samples:", samples)
+    print("probs:", " ".join(f"{p:.5f}" for p in b.probs[torch.sort(samples).values].tolist()))
+    print("samples:", torch.sort(samples).values)
 
     # shuffle back
-    samples = shuffle_idx[samples]
+    # samples = shuffle_idx[samples]
     # print("samples:", samples)
 
     print("shared between probs and perturbed:",
@@ -777,12 +777,12 @@ def grapes_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, s
     for d in range(depth):
         neighbors = get_neighbours_sparse(A_en, previous_nodes)
         mask = ~torch.isin(neighbors, previous_nodes)
-        # only_neighbors = neighbors[mask]
+        only_neighbors = neighbors[mask]
         cols = getAdjacencyNodeColumnIdx(previous_nodes, num_nodes, 2*num_rels+1)
         # A_en_row = slice_rows_tensor2(A_en, previous_nodes)
         A_gf = slice_adj_row_col(A_en, neighbors, cols, len(neighbors), len(previous_nodes), 'prob')
         # calculate the importance of each neighbor
-        indicator_features[neighbors, d] = 1.0
+        indicator_features[only_neighbors, d] = 1.0
         # batch_nodes = neighbors[~torch.isin(neighbors, previous_nodes)]
         x = torch.cat([embed_X[neighbors],
                     indicator_features[neighbors]],
@@ -795,23 +795,22 @@ def grapes_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, s
         # calculate the probability of sampling each neighbor in each relation
         # output the relations that appear in at least one neighbor
 
+        node_logits = node_logits[mask]
         s_num = samp_num_list[d]
         if s_num > 0:
             idx_local, log_prob, statistics = sample_neighborhoods_from_probs(
                 node_logits,
-                A_gf,
                 s_num,
-            num_rels,
-            not(model_g.training),
-            current_e,
-            start_e,
-            end_e)
+                not(model_g.training),
+                current_e,
+                start_e,
+                end_e)
             log_probs.append(log_prob)
             # sample nodes given their probablity.
             # output the local and global idx of the neighbors, the probability of the nodes sampled
             # idx_local, nonzero_rels, global_idx, prob, rels_more = sel_idx_node(p, s_num, num_nodes, num_rels)
             idx_list_per_rel = []
-            after_nodes = neighbors[idx_local]  # unique node idx
+            after_nodes = only_neighbors[idx_local]  # unique node idx
             print("after nodes:", torch.unique(after_nodes))
         else:
             after_nodes = batch_idx
