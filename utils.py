@@ -597,8 +597,8 @@ def sample_neighborhoods_from_probs(logits, num_samples, test, current_e, start_
     assert k > 0
 
     # shuffle logits
-    # shuffle_idx = torch.randperm(logits.size(0))
-    # logits = logits[shuffle_idx]
+    shuffle_idx = torch.randperm(logits.size(0))
+    logits = logits[shuffle_idx]
     test = True
     b = Bernoulli(logits=logits.squeeze())
     # Gumbel-sort trick https://timvieira.github.io/blog/post/2014/08/01/gumbel-max-trick-and-weighted-reservoir-sampling/
@@ -621,15 +621,16 @@ def sample_neighborhoods_from_probs(logits, num_samples, test, current_e, start_
     if test:
         samples = torch.topk(b.probs, k=k, dim=0, sorted=False)[1].to('cpu')#torch.topk(b.probs+torch.rand(n)*1e-2, k=k, dim=0, sorted=False)[1].to('cpu')
         # samples = torch.arange(k)
+        # samples = torch.sort(b.probs)[1][-k:].to('cpu')
     else:
         samples = torch.topk(perturbed_log_probs, k=k, dim=0, sorted=False)[1].to('cpu')
 
-    print("probs:", " ".join(f"{p:.5f}" for p in b.probs[torch.sort(samples).values].tolist()))
+    print("probs:", " ".join(f"{p:.5f}" for p in torch.sort(b.probs[samples], descending=True).values))
     print("samples:", torch.sort(samples).values)
 
     # shuffle back
-    # samples = shuffle_idx[samples]
-    # print("samples:", samples)
+    samples = shuffle_idx[samples]
+    print("samples shuffled:", samples)
 
     print("shared between probs and perturbed:",
           len(set(torch.topk(b.probs, k=k, dim=0, sorted=False)[1].to('cpu').tolist()) &
@@ -791,7 +792,7 @@ def grapes_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, s
         if d == 0:
             pred_z, _ = model_z(embed_X[neighbors], A_gf.to(device), neighbors, [], [], 'full', device)
             log_z = pred_z.mean()
-        num_prev_nodes = len(previous_nodes)
+
         # calculate the probability of sampling each neighbor in each relation
         # output the relations that appear in at least one neighbor
 
@@ -845,7 +846,7 @@ def grapes_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, s
         # sample A
         # A_en_sliced.append(slice_adj_col(A_en_row, col_ind, 2 * num_rels + 1, num_prev_nodes, sampler, after_nodes,
         #                                  len(after_nodes), [], []).to(device))
-        A_en_sliced.append(slice_adj_row_col(A_en, previous_nodes, cols, num_prev_nodes, len(after_nodes), 'cl').to(device))
+        A_en_sliced.append(slice_adj_row_col(A_en, previous_nodes, cols, len(previous_nodes), len(after_nodes), 'cl').to(device))
         # A_en_sliced.append(slice_adj_col(A_en_row, col_ind, 2 * num_rels + 1, num_prev_nodes, sampler, after_nodes,
         #                                  len(after_nodes), global_idx, prob).to(device))
 
