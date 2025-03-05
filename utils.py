@@ -1220,6 +1220,8 @@ def slice_adj_row_col(A, row_ind, col_ind, num_prev_nodes, num_after_nodes, mode
     ones = torch.ones(r, col_size, 1)
     block_mat = torch.block_diag(*ones)
     sums = torch.squeeze(torch.spmm(values, block_mat))
+    if sums.dim() == 1:
+        sums = torch.unsqueeze(sums, 0)
     sums_a = sums[indices[0], torch.div(indices[1], col_size, rounding_mode='floor')]
     vals_norm = torch.div(vals, sums_a)
 
