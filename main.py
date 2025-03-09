@@ -311,56 +311,55 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
                         batch_node_idx_s, id_sorted = batch_node_idx.sort()
                         batch_y_test_s = batch_y_test[id_sorted]
 
-                        for b in range(len(batch_node_idx_s)):
-                            indicator_features.zero_()
-                            indicator_features[batch_node_idx_s[b], -1] = 1.0
-                            adj_ts_sliced, after_nodes_list, idx_per_rel_list, nonzero_rel_list, rels_more, log_probs, \
-                            log_z, _, _, _ = sampler_func(sampler,
-                                             torch.unsqueeze(batch_node_idx_s[b],0),
-                                             data.num_entities,
-                                             num_rels,
-                                             adj_ts,
-                                             adj_norel_ts,
-                                             [],
-                                             samp_num_list,
-                                             depth,
-                                             model_g,
-                                             model_z,
-                                             embed_X,
-                                             indicator_features,
-                                             epoch,
-                                             start_e,
-                                             num_epochs,
-                                             False,
-                                             pert_ratio,
-                                             device)
 
-                            batch_out_test, _ = model_c(embed_X, adj_ts_sliced,
-                                                                after_nodes_list, idx_per_rel_list,
-                                                                nonzero_rel_list, test_state, device)
+                        indicator_features.zero_()
+                        indicator_features[batch_node_idx_s[b], -1] = 1.0
+                        adj_ts_sliced, after_nodes_list, idx_per_rel_list, nonzero_rel_list, rels_more, log_probs, \
+                        log_z, _, _, _ = sampler_func(sampler,
+                                         torch.unsqueeze(batch_node_idx_s[b],0),
+                                         data.num_entities,
+                                         num_rels,
+                                         adj_ts,
+                                         adj_norel_ts,
+                                         [],
+                                         samp_num_list,
+                                         depth,
+                                         model_g,
+                                         model_z,
+                                         embed_X,
+                                         indicator_features,
+                                         epoch,
+                                         start_e,
+                                         num_epochs,
+                                         False,
+                                         pert_ratio,
+                                         device)
+                        batch_out_test, _ = model_c(embed_X, adj_ts_sliced,
+                                                            after_nodes_list, idx_per_rel_list,
+                                                            nonzero_rel_list, test_state, device)
 
-                            batch_loss_test = criterion(batch_out_test, batch_y_test_s[b])  ###### TODO: l2 penalty #######
-                            with torch.no_grad():
-                                batch_acc_test = (batch_out_test.argmax(dim=1) == batch_y_test_s[b]).sum().item()/len(batch_y_test_s) * 100
-                            print("Repeat", i, ", Testing Epoch: ", epoch, " , batch number: ", batch_id, "/", test_num_batches, "Accuracy:",
-                                  batch_acc_test)
+                        batch_loss_test = criterion(batch_out_test, batch_y_test_s)  ###### TODO: l2 penalty #######
+                        with torch.no_grad():
+                            batch_acc_test = (batch_out_test.argmax(dim=1) == batch_y_test_s).sum().item()/len(batch_y_test_s) * 100
+                        print("Repeat", i, ", Testing Epoch: ", epoch, " , batch number: ", batch_id, "/", test_num_batches, "Accuracy:",
+                              batch_acc_test)
 
-                            loss += batch_loss_test
-                            acc += batch_acc_test
+                        loss += batch_loss_test
+                        acc += batch_acc_test
 
-                            if epoch == num_epochs - 1 and draw:
+                        if epoch == num_epochs - 1 and draw:
                                 # plot_graph(batch_node_idx_s, data, after_nodes_list, batch_out_train, batch_y_train_s,
                                 # y_train)
-                                file_path = os.path.join(folder,
-                                                         f'{data_name}_sampled_test_epoch{epoch}_batch{batch_id}.pkl')
-                                sampled_dict = {'targets': batch_node_idx_s, 'after_nodes_list': after_nodes_list,
-                                                'out': batch_out_train, 'batch_y': batch_y_train_s}
-                                with open(file_path, 'wb') as f:
-                                    pkl.dump(sampled_dict, f)
+                            file_path = os.path.join(folder,
+                                                     f'{data_name}_sampled_test_epoch{epoch}_batch{batch_id}.pkl')
+                            sampled_dict = {'targets': batch_node_idx_s, 'after_nodes_list': after_nodes_list,
+                                            'out': batch_out_train, 'batch_y': batch_y_train_s}
+                            with open(file_path, 'wb') as f:
+                                pkl.dump(sampled_dict, f)
 
-                            layers_c = [model_c.batch_rgcn.comp1.to('cpu'), model_c.batch_rgcn.comp2.to('cpu')]
-                            with open(f"test_{data_name}_comps.pkl", 'wb') as f:
-                                pkl.dump(layers_c, f)
+                        layers_c = [model_c.batch_rgcn.comp1.to('cpu'), model_c.batch_rgcn.comp2.to('cpu')]
+                        with open(f"test_{data_name}_comps.pkl", 'wb') as f:
+                            pkl.dump(layers_c, f)
 
                     loss_test = loss / test_num_batches
                     acc_test = acc / test_num_batches
