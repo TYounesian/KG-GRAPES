@@ -53,7 +53,6 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
     num_rels = data.num_relations
 
     save_model_info = False
-    samp_num_list = [samp0, samp0]
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
     y_train = y_train.to(device)
@@ -129,6 +128,7 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
         # y_train = y_train[shuffle_idx]
 
         for epoch in range(0, num_epochs):
+            samp_num_list = [samp0, samp0]
             start_e = 0
             pert = False
             pert_ratio = 0.25

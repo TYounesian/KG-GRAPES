@@ -625,19 +625,19 @@ def sample_neighborhoods_from_probs(logits, num_samples, test, current_e, start_
     else:
         samples = torch.topk(perturbed_log_probs, k=k, dim=0, sorted=False)[1].to('cpu')
 
-    print("probs:", " ".join(f"{p:.5f}" for p in torch.sort(b.probs[samples], descending=True).values))
-    print("samples:", torch.sort(samples).values)
+    # print("probs:", " ".join(f"{p:.5f}" for p in torch.sort(b.probs[samples], descending=True).values))
+    #print("samples:", torch.sort(samples).values)
 
     # shuffle back
     samples = shuffle_idx[samples]
-    print("samples shuffled:", samples)
+    #print("samples shuffled:", samples)
 
-    print("shared between probs and perturbed:",
-          len(set(torch.topk(b.probs, k=k, dim=0, sorted=False)[1].to('cpu').tolist()) &
-              set(torch.topk(perturbed_log_probs, k=k, dim=0, sorted=False)[1].to('cpu').tolist())))
-    print("shared between noise and perturbed:",
-          len(set(torch.topk(gumbel_noise, k=k, dim=0, sorted=False)[1].to('cpu').tolist()) &
-              set(torch.topk(perturbed_log_probs, k=k, dim=0, sorted=False)[1].to('cpu').tolist())))
+    # print("shared between probs and perturbed:",
+    #       len(set(torch.topk(b.probs, k=k, dim=0, sorted=False)[1].to('cpu').tolist()) &
+    #           set(torch.topk(perturbed_log_probs, k=k, dim=0, sorted=False)[1].to('cpu').tolist())))
+    # print("shared between noise and perturbed:",
+    #       len(set(torch.topk(gumbel_noise, k=k, dim=0, sorted=False)[1].to('cpu').tolist()) &
+    #           set(torch.topk(perturbed_log_probs, k=k, dim=0, sorted=False)[1].to('cpu').tolist())))
     # calculate the entropy in bits
     entropy = -(b.probs * (b.probs).log2() + (1 - b.probs) * (1 - b.probs).log2())
 
