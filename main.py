@@ -311,12 +311,12 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
                         batch_node_idx_s, id_sorted = batch_node_idx.sort()
                         batch_y_test_s = batch_y_test[id_sorted]
 
-
+                        samp_num_list = [test_batch_size, test_batch_size]
                         indicator_features.zero_()
-                        indicator_features[batch_node_idx_s[b], -1] = 1.0
+                        indicator_features[batch_node_idx_s, -1] = 1.0
                         adj_ts_sliced, after_nodes_list, idx_per_rel_list, nonzero_rel_list, rels_more, log_probs, \
                         log_z, _, _, _ = sampler_func(sampler,
-                                         torch.unsqueeze(batch_node_idx_s[b],0),
+                                         batch_node_idx_s,
                                          data.num_entities,
                                          num_rels,
                                          adj_ts,
