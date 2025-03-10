@@ -220,6 +220,15 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
                         print(f'Repeat: {i}, Training Epoch: {epoch}, batch number: {batch_id}/{train_num_batches}, '
                               f'Accuracy: {batch_acc_train}, necessity: {necessity}, Acc train pert: {batch_acc_train_pert}')
 
+                    draw = False
+                    if epoch == num_epochs - 1 and draw:
+                        file_path = os.path.join(folder,
+                                                 f'{data_name}_sampled_train_epoch{epoch}_batch{batch_id}_{b}.pkl')
+                        sampled_dict = {'targets': batch_node_idx_s[b], 'after_nodes_list': after_nodes_list,
+                                        'out': batch_out_train, 'batch_y': batch_y_train_s[b]}
+                        with open(file_path, 'wb') as f:
+                            pkl.dump(sampled_dict, f)
+
                     batch_loss_train = batch_loss_train/torch.tensor(len(batch_y_train_s))
                     batch_loss_train.backward()
                     optimizer_c.step()
@@ -255,13 +264,6 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
                     acc += batch_acc_train
                     num_nodes_list.append(len(nodes_needed))
                     total_rels_more += rels_more
-                    draw = False
-                    if epoch == num_epochs-1 and draw:
-                        file_path = os.path.join(folder, f'{data_name}_sampled_train_epoch{epoch}_batch{batch_id}.pkl')
-                        sampled_dict = {'targets': batch_node_idx_s, 'after_nodes_list': after_nodes_list,
-                                        'out': batch_out_train, 'batch_y': batch_y_train_s}
-                        with open(file_path, 'wb') as f:
-                            pkl.dump(sampled_dict, f)
 
                     layers_c = [model_c.batch_rgcn.comp1.to('cpu'), model_c.batch_rgcn.comp2.to('cpu')]
                     with open(f"train_{data_name}_comps.pkl", 'wb') as f:
