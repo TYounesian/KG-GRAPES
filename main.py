@@ -145,6 +145,7 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
                 model_g.train()
                 for batch_id in range(0, train_num_batches):
                     acc_batch = 0.
+                    loss_batch = 0.
                     batch_loss_train = 0
                     start = time.time()
                     if batch_id == train_num_batches-1:
@@ -221,6 +222,7 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
                         print(f'Repeat: {i}, Training Epoch: {epoch}, batch number: {batch_id}/{train_num_batches}, '
                               f'Accuracy: {batch_acc_train}, necessity: {necessity}, Acc train pert: {batch_acc_train_pert}')
                         acc_batch += batch_acc_train
+                        loss_batch += batch_loss_train
 
                     draw = False
                     if epoch == num_epochs - 1 and draw:
@@ -231,7 +233,7 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
                         with open(file_path, 'wb') as f:
                             pkl.dump(sampled_dict, f)
 
-                    batch_loss_train = batch_loss_train/torch.tensor(len(batch_y_train_s))
+                    batch_loss_train = loss_batch/torch.tensor(len(batch_y_train_s))
                     batch_loss_train.backward()
                     optimizer_c.step()
                     if sampler == 'grapes':
