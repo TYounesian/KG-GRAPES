@@ -144,6 +144,7 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
                 model_c.train()
                 model_g.train()
                 for batch_id in range(0, train_num_batches):
+                    acc_batch = 0.
                     batch_loss_train = 0
                     start = time.time()
                     if batch_id == train_num_batches-1:
@@ -219,6 +220,7 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
                         print(f'train batch time ({time.time() - start:.4}s).')
                         print(f'Repeat: {i}, Training Epoch: {epoch}, batch number: {batch_id}/{train_num_batches}, '
                               f'Accuracy: {batch_acc_train}, necessity: {necessity}, Acc train pert: {batch_acc_train_pert}')
+                        acc_batch += batch_acc_train
 
                     draw = False
                     if epoch == num_epochs - 1 and draw:
@@ -261,7 +263,7 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
 
                     loss_c += batch_loss_train
                     loss_g += batch_loss_g
-                    acc += batch_acc_train
+                    acc += acc_batch/train_batch_size
                     num_nodes_list.append(len(nodes_needed))
                     total_rels_more += rels_more
 
