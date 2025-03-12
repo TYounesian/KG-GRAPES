@@ -119,8 +119,8 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
         print('start training!')
         current_time = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
         folder = f'sampled_{current_time}'
-        # if not os.path.exists(folder):
-        #     os.makedirs(folder)
+        if not os.path.exists(folder):
+            os.makedirs(folder)
 
         # # shuffle
         # shuffle_idx = torch.randperm(train_idx.size(0))
@@ -130,7 +130,7 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
         for epoch in range(0, num_epochs):
             samp_num_list = [samp0, samp0]
             start_e = 0
-            pert = False
+            pert = True
             pert_ratio = 0.25
             loss_c = 0
             loss_g = 0
@@ -146,7 +146,9 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
                 for batch_id in range(0, train_num_batches):
                     acc_batch = 0.
                     loss_batch = 0.
-                    batch_loss_train = 0
+                    batch_loss_train = 0.
+                    batch_pert_acc = 0.
+                    batch_nec = 0.
                     start = time.time()
                     if batch_id == train_num_batches-1:
                         batch_node_idx = train_idx[batch_id * train_batch_size:]
@@ -195,9 +197,10 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
                                                                      after_nodes_list_pert, idx_per_rel_list,
                                                                      nonzero_rel_list, test_state, device)
                             with torch.no_grad():
-                                batch_acc_train_pert = (batch_out_train_pert.argmax(dim=1) == batch_y_train_s).sum().item() / len(
-                                    batch_y_train_s) * 100
-                                necessity = sum(batch_out_train - batch_out_train_pert)/len(batch_out_train)
+                                batch_acc_train_pert = (batch_out_train_pert.argmax(dim=1) == torch.unsqueeze(batch_y_train_s[b], 0)).sum().item() * 100
+                                necessity = (F.softmax(batch_out_train, dim=1) - F.softmax(batch_out_train_pert, dim=1)).sum()/len(batch_out_train)
+                            batch_pert_acc += batch_acc_train_pert
+                            batch_nec += necessity
 
                         if save_model_info and epoch == 0:
                             if batch_id == 0:
@@ -224,7 +227,7 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
                         acc_batch += batch_acc_train
                         loss_batch += batch_loss_train
 
-                        draw = False
+                        draw = True
                         if epoch == num_epochs - 1 and draw:
                             file_path = os.path.join(folder,
                                                      f'{data_name}_sampled_train_epoch{epoch}_batch{batch_id}_{b}.pkl')
@@ -251,11 +254,13 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
                         cost_gfn = 0.
 
                     wandb.log({'epoch': epoch,
-                                'train_batch_loss_c': batch_loss_train,
-                                'train_batch_loss_g': batch_loss_g,
-                                'log_z': log_z,
-                                'log_probs': tot_log_prob,
-                                'diff': loss_coef * cost_gfn + tot_log_prob})
+                               'train_batch_loss_c': batch_loss_train,
+                               'train_batch_loss_g': batch_loss_g,
+                               'log_z': log_z,
+                               'log_probs': tot_log_prob,
+                               'diff': loss_coef * cost_gfn + tot_log_prob,
+                               'batch_pert_acc': batch_pert_acc/train_batch_size,
+                               'batch_necessity': batch_nec})
                     log_dict = {}
                     for j, stat in enumerate(statistics):
                         for key, value in stat.items():
