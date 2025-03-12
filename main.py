@@ -224,14 +224,14 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
                         acc_batch += batch_acc_train
                         loss_batch += batch_loss_train
 
-                    draw = False
-                    if epoch == num_epochs - 1 and draw:
-                        file_path = os.path.join(folder,
-                                                 f'{data_name}_sampled_train_epoch{epoch}_batch{batch_id}_{b}.pkl')
-                        sampled_dict = {'targets': batch_node_idx_s[b], 'after_nodes_list': after_nodes_list,
-                                        'out': batch_out_train, 'batch_y': batch_y_train_s[b]}
-                        with open(file_path, 'wb') as f:
-                            pkl.dump(sampled_dict, f)
+                        draw = False
+                        if epoch == num_epochs - 1 and draw:
+                            file_path = os.path.join(folder,
+                                                     f'{data_name}_sampled_train_epoch{epoch}_batch{batch_id}_{b}.pkl')
+                            sampled_dict = {'targets': batch_node_idx_s[b], 'after_nodes_list': after_nodes_list,
+                                            'out': batch_out_train, 'batch_y': batch_y_train_s[b]}
+                            with open(file_path, 'wb') as f:
+                                pkl.dump(sampled_dict, f)
 
                     batch_loss_train = loss_batch/torch.tensor(len(batch_y_train_s))
                     batch_loss_train.backward()
