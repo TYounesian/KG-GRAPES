@@ -198,7 +198,8 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
                                                                      nonzero_rel_list, test_state, device)
                             with torch.no_grad():
                                 batch_acc_train_pert = (batch_out_train_pert.argmax(dim=1) == torch.unsqueeze(batch_y_train_s[b], 0)).sum().item() * 100
-                                necessity = (F.softmax(batch_out_train, dim=1) - F.softmax(batch_out_train_pert, dim=1)).sum()/len(batch_out_train)
+                                necessity = torch.abs(torch.squeeze(F.softmax(batch_out_train, dim=1))[batch_y_train_s[b]]
+                                                      - torch.squeeze(F.softmax(batch_out_train_pert, dim=1))[batch_y_train_s[b]])
                             batch_pert_acc += batch_acc_train_pert
                             batch_nec += necessity
 
@@ -260,7 +261,7 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
                                'log_probs': tot_log_prob,
                                'diff': loss_coef * cost_gfn + tot_log_prob,
                                'batch_pert_acc': batch_pert_acc/train_batch_size,
-                               'batch_necessity': batch_nec})
+                               'batch_necessity': batch_nec/train_batch_size})
                     log_dict = {}
                     for j, stat in enumerate(statistics):
                         for key, value in stat.items():
