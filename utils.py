@@ -762,8 +762,6 @@ def fastgcn_plus_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, de
 
 def grapes_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, sampler, model_g, model_z, embed_X,
                    indicator_features, current_e, start_e, end_e, pert, pert_ratio, device):
-    previous_nodes = batch_idx
-    previous_nodes_pert = batch_idx
     col_ind = []
     A_en_sliced = []
     A_en_sliced_pert = []
@@ -774,96 +772,170 @@ def grapes_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, s
     non_zero_rel_list = []
     log_probs = []
     stats = []
+    previous_nodes = batch_idx
+    previous_nodes_pert = batch_idx
 
-    for d in range(depth):
-        neighbors = get_neighbours_sparse(A_en, previous_nodes)
-        mask = ~torch.isin(neighbors, previous_nodes)
-        only_neighbors = neighbors[mask]
-        cols = getAdjacencyNodeColumnIdx(previous_nodes, num_nodes, 2*num_rels+1)
-        # A_en_row = slice_rows_tensor2(A_en, previous_nodes)
-        A_gf = slice_adj_row_col(A_en, neighbors, cols, len(neighbors), len(previous_nodes), 'prob')
-        # calculate the importance of each neighbor
-        indicator_features[only_neighbors, d] = 1.0
-        # batch_nodes = neighbors[~torch.isin(neighbors, previous_nodes)]
-        x = torch.cat([embed_X[neighbors],
-                    indicator_features[neighbors]],
-                    dim=1)
-        node_logits, _ = model_g(x, A_gf.to(device), neighbors, [], [], 'full', device)
-        if d == 0:
-            pred_z, _ = model_z(embed_X[neighbors], A_gf.to(device), neighbors, [], [], 'full', device)
-            log_z = pred_z.mean()
+    if not(model_g.training):
+        for d in range(depth):
+            neighbors = get_neighbours_sparse(A_en, previous_nodes)
+            mask = ~torch.isin(neighbors, previous_nodes)
+            only_neighbors = neighbors[mask]
+            cols = getAdjacencyNodeColumnIdx(previous_nodes, num_nodes, 2*num_rels+1)
+            # A_en_row = slice_rows_tensor2(A_en, previous_nodes)
+            A_gf = slice_adj_row_col(A_en, neighbors, cols, len(neighbors), len(previous_nodes), 'prob')
+            # calculate the importance of each neighbor
+            indicator_features[only_neighbors, d] = 1.0
+            # batch_nodes = neighbors[~torch.isin(neighbors, previous_nodes)]
+            x = torch.cat([embed_X[neighbors],
+                        indicator_features[neighbors]],
+                        dim=1)
+            node_logits, _ = model_g(x, A_gf.to(device), neighbors, [], [], 'full', device)
+            if d == 0:
+                pred_z, _ = model_z(embed_X[neighbors], A_gf.to(device), neighbors, [], [], 'full', device)
+                log_z = pred_z.mean()
 
-        # calculate the probability of sampling each neighbor in each relation
-        # output the relations that appear in at least one neighbor
+            # calculate the probability of sampling each neighbor in each relation
+            # output the relations that appear in at least one neighbor
 
-        node_logits = node_logits[mask]
-        s_num = samp_num_list[d]
-        if s_num > 0:
-            idx_local, log_prob, statistics = sample_neighborhoods_from_probs(
-                node_logits,
-                s_num,
-                not(model_g.training),
-                current_e,
-                start_e,
-                end_e)
-            log_probs.append(log_prob)
-            # sample nodes given their probablity.
-            # output the local and global idx of the neighbors, the probability of the nodes sampled
-            # idx_local, nonzero_rels, global_idx, prob, rels_more = sel_idx_node(p, s_num, num_nodes, num_rels)
-            idx_list_per_rel = []
-            after_nodes = only_neighbors[idx_local]  # unique node idx
-            print("after nodes:", torch.unique(after_nodes))
-        else:
-            after_nodes = batch_idx
+            node_logits = node_logits[mask]
+            s_num = samp_num_list[d]
+            if s_num > 0:
+                idx_local, log_prob, statistics = sample_neighborhoods_from_probs(
+                    node_logits,
+                    s_num,
+                    not(model_g.training),
+                    current_e,
+                    start_e,
+                    end_e)
+                log_probs.append(log_prob)
+                # sample nodes given their probablity.
+                # output the local and global idx of the neighbors, the probability of the nodes sampled
+                # idx_local, nonzero_rels, global_idx, prob, rels_more = sel_idx_node(p, s_num, num_nodes, num_rels)
+                idx_list_per_rel = []
+                after_nodes = only_neighbors[idx_local]  # unique node idx
+                print("after nodes:", torch.unique(after_nodes))
+            else:
+                after_nodes = batch_idx
 
-        # A_row = slice_rows_tensor2(nore_A, previous_nodes)
-        # A_en_row = slice_rows_tensor2(A_en, previous_nodes)
-        # size = [len(previous_nodes), num_nodes]
-        # pi = calc_prob(A_row, size, 1, device)
-        # num_prev_nodes = len(previous_nodes)
-        # sum_pi = pi.sum()
-        # p = pi / sum_pi
-        # s_num = samp_num_list[d]
-        # if s_num > 0:
-        #     idx_local, nonzero_rels, global_idx, prob, rels_more = sel_idx_node(p, s_num, num_nodes, 1)
-        #     idx_list_per_rel = []
-        #     after_nodes = idx_local  # unique node idx
+            # Testing how LDUN works within this setup
 
-        # unique node idx with aggregation
-        after_nodes = torch.unique(torch.cat((after_nodes, batch_idx.to('cpu'))))
-        if pert:
-            after_nodes_pert = neighbors[torch.randperm(s_num)[:int(s_num * (1 - pert_ratio))]]
-            after_nodes_pert = torch.unique(torch.cat((after_nodes_pert, batch_idx.to('cpu'))))
-            cols = getAdjacencyNodeColumnIdx(after_nodes_pert, num_nodes, 2 * num_rels + 1)
+            # A_row = slice_rows_tensor2(nore_A, previous_nodes)
+            # A_en_row = slice_rows_tensor2(A_en, previous_nodes)
+            # size = [len(previous_nodes), num_nodes]
+            # pi = calc_prob(A_row, size, 1, device)
+            # num_prev_nodes = len(previous_nodes)
+            # sum_pi = pi.sum()
+            # p = pi / sum_pi
+            # s_num = samp_num_list[d]
+            # if s_num > 0:
+            #     idx_local, nonzero_rels, global_idx, prob, rels_more = sel_idx_node(p, s_num, num_nodes, 1)
+            #     idx_list_per_rel = []
+            #     after_nodes = idx_local  # unique node idx
+
+            # unique node idx with aggregation
+            after_nodes = torch.unique(torch.cat((after_nodes, batch_idx.to('cpu'))))
+            if pert:
+                after_nodes_pert = neighbors[torch.randperm(s_num)[:int(s_num * (1 - pert_ratio))]]
+                after_nodes_pert = torch.unique(torch.cat((after_nodes_pert, batch_idx.to('cpu'))))
+                cols = getAdjacencyNodeColumnIdx(after_nodes_pert, num_nodes, 2 * num_rels + 1)
+                col_ind.append(cols)
+                # sample A
+                A_en_sliced_pert.append(
+                    slice_adj_row_col(A_en, previous_nodes_pert, cols, len(previous_nodes_pert), len(after_nodes_pert), 'cl').to(device))
+                previous_nodes_pert = after_nodes_pert
+
+            cols = getAdjacencyNodeColumnIdx(after_nodes, num_nodes, 2*num_rels+1)
             col_ind.append(cols)
             # sample A
-            A_en_sliced_pert.append(
-                slice_adj_row_col(A_en, previous_nodes_pert, cols, len(previous_nodes_pert), len(after_nodes_pert), 'cl').to(device))
-            previous_nodes_pert = after_nodes_pert
+            # A_en_sliced.append(slice_adj_col(A_en_row, col_ind, 2 * num_rels + 1, num_prev_nodes, sampler, after_nodes,
+            #                                  len(after_nodes), [], []).to(device))
+            A_en_sliced.append(slice_adj_row_col(A_en, previous_nodes, cols, len(previous_nodes), len(after_nodes), 'cl').to(device))
+            # A_en_sliced.append(slice_adj_col(A_en_row, col_ind, 2 * num_rels + 1, num_prev_nodes, sampler, after_nodes,
+            #                                  len(after_nodes), global_idx, prob).to(device))
+            previous_nodes = after_nodes
 
-        cols = getAdjacencyNodeColumnIdx(after_nodes, num_nodes, 2*num_rels+1)
-        col_ind.append(cols)
-        # sample A
-        # A_en_sliced.append(slice_adj_col(A_en_row, col_ind, 2 * num_rels + 1, num_prev_nodes, sampler, after_nodes,
-        #                                  len(after_nodes), [], []).to(device))
-        A_en_sliced.append(slice_adj_row_col(A_en, previous_nodes, cols, len(previous_nodes), len(after_nodes), 'cl').to(device))
-        # A_en_sliced.append(slice_adj_col(A_en_row, col_ind, 2 * num_rels + 1, num_prev_nodes, sampler, after_nodes,
-        #                                  len(after_nodes), global_idx, prob).to(device))
+            after_nodes_list.append(after_nodes)
+            after_nodes_list_pert.append(after_nodes_pert)
+            idx_list_per_rel_dev = [i.to(device) for i in idx_list_per_rel]
+            idx_per_rel_list.append(idx_list_per_rel_dev)
+            stats.append(statistics)
+            # non_zero_rel_list.append(nonzero_rels)
+    else:
+        sampled_set = [[],[]]
+        log_probs = [[],[]]
+        stats = [[],[]]
+        log_z = []
+        for b in batch_idx:
+            previous_nodes = torch.unsqueeze(b, dim=0)
+            for d in range(depth):
+                neighbors = get_neighbours_sparse(A_en, previous_nodes)
+                mask = ~torch.isin(neighbors, previous_nodes)
+                only_neighbors = neighbors[mask]
+                cols = getAdjacencyNodeColumnIdx(previous_nodes, num_nodes, 2*num_rels+1)
+                # A_en_row = slice_rows_tensor2(A_en, previous_nodes)
+                A_gf = slice_adj_row_col(A_en, neighbors, cols, len(neighbors), len(previous_nodes), 'prob')
+                # calculate the importance of each neighbor
+                indicator_features[only_neighbors, d] = 1.0
+                x = torch.cat([embed_X[neighbors],
+                            indicator_features[neighbors]],
+                            dim=1)
+                node_logits, _ = model_g(x, A_gf.to(device), neighbors, [], [], 'full', device)
+                if d == 0:
+                    pred_z, _ = model_z(embed_X[neighbors], A_gf.to(device), neighbors, [], [], 'full', device)
+                    log_z.append(pred_z.mean())
 
-        previous_nodes = after_nodes
+                node_logits = node_logits[mask]
+                s_num = samp_num_list[d]
+                if s_num > 0:
+                    idx_local, log_prob, statistics = sample_neighborhoods_from_probs(
+                        node_logits,
+                        s_num,
+                        not (model_g.training),
+                        current_e,
+                        start_e,
+                        end_e)
+                    log_probs[d].append(log_prob)
+                    idx_list_per_rel = []
+                    after_nodes = only_neighbors[idx_local]  # unique node idx
+                    print("after nodes:", torch.unique(after_nodes))
+                else:
+                    after_nodes = batch_idx
 
-        after_nodes_list.append(after_nodes)
-        after_nodes_list_pert.append(after_nodes_pert)
-        idx_list_per_rel_dev = [i.to(device) for i in idx_list_per_rel]
-        idx_per_rel_list.append(idx_list_per_rel_dev)
-        stats.append(statistics)
-        # non_zero_rel_list.append(nonzero_rels)
+                sampled_set[d].append(after_nodes) # record what has been sampled in each hop
+                after_nodes = torch.unique(torch.cat((after_nodes, batch_idx.to('cpu'))))
+                previous_nodes = after_nodes
+                stats[d].append(statistics)
+        previous_nodes = batch_idx
+        for d in range(depth):
+            after_nodes = torch.unique(torch.cat((torch.tensor(sampled_set[d]), batch_idx.to('cpu'))))
+            cols = getAdjacencyNodeColumnIdx(after_nodes, num_nodes, 2 * num_rels + 1)
+            col_ind.append(cols)
+            # sample A
+            A_en_sliced.append(
+                slice_adj_row_col(A_en, previous_nodes, cols, len(previous_nodes), len(after_nodes), 'cl').to(
+                    device))
+            if pert:
+                after_nodes_pert = torch.tensor(sampled_set[d])[torch.randperm(len(sampled_set[d]))[:int(len(sampled_set[d]) * (1 - pert_ratio))]]
+                after_nodes_pert = torch.unique(torch.cat((after_nodes_pert, batch_idx.to('cpu'))))
+                cols = getAdjacencyNodeColumnIdx(after_nodes_pert, num_nodes, 2 * num_rels + 1)
+                col_ind.append(cols)
+                # sample A
+                A_en_sliced_pert.append(
+                    slice_adj_row_col(A_en, previous_nodes_pert, cols, len(previous_nodes_pert), len(after_nodes_pert), 'cl').to(device))
+                previous_nodes_pert = after_nodes_pert
+            previous_nodes = after_nodes
+            after_nodes_list.append(after_nodes)
+            after_nodes_list_pert.append(after_nodes_pert)
+            idx_list_per_rel_dev = [i.to(device) for i in idx_list_per_rel]
+            idx_per_rel_list.append(idx_list_per_rel_dev)
+        log_z = sum(t for t in log_z)
     A_en_sliced.reverse()
     A_en_sliced_pert.reverse()
     after_nodes_list.reverse()
     after_nodes_list_pert.reverse()
     idx_per_rel_list.reverse()
     stats.reverse()
+
     return A_en_sliced, after_nodes_list, idx_per_rel_list, non_zero_rel_list, 0, log_probs, log_z, stats, \
            A_en_sliced_pert, after_nodes_list_pert
 

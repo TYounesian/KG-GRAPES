@@ -20,14 +20,15 @@ from utils import *
 # @profile
 from datetime import datetime
 
+
 def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_epochs=50, modality='no',
        l2=5e-4, lr_c=0.01, lr_d=0, lr_g=0.01, loss_coef=1e4, log_z_init=0., use_indicators=True, prune=True, final=True,
        embed_size=16, bases=40, sampler='LDRN', depth=2, samp0=2048, self_loop_dropout=0, test_state='full',
        testing=True, saving=False, repeat=5, lr_embed=0, log_wandb=False):
-
     config = {
         "project": project, "data_name": data_name, "batch_size": batch_size, "feat_size": feat_size,
-        "num_epochs": num_epochs, "modality": modality, "l2": l2, "lr_c": lr_c, "lr_d": lr_d, "lr_g": lr_g, 'loss_coef': loss_coef,
+        "num_epochs": num_epochs, "modality": modality, "l2": l2, "lr_c": lr_c, "lr_d": lr_d, "lr_g": lr_g,
+        'loss_coef': loss_coef,
         "prune": prune, "final": final, "embed_size": embed_size, "bases": bases, "sampler": sampler, "depth": depth,
         "samp0": samp0, "self_loop_dropout": self_loop_dropout, "test_state": test_state, "testing": testing,
         "saving": saving, "repeat": repeat, "lr_embed": lr_embed
@@ -46,11 +47,19 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
             pkl.dump(data, f)
     data = kg.group(data)
 
-    train_idx = data.training[:, 0].long()
     y_train = data.training[:, 1].long()
-    test_idx = data.withheld[:, 0].long()
+    train_idx = data.training[:, 0].long()
     y_test = data.withheld[:, 1].long()
+    test_idx = data.withheld[:, 0].long()
     num_rels = data.num_relations
+
+    multilabel = False
+    if multilabel:
+        y_train = data.training[:, 1:].long()
+        y_test = data.withheld[:, 1:].long()
+        data.num_classes = y_train.size(1)
+        y_train = y_train.float()
+        y_test = y_test.float()
 
     save_model_info = False
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
@@ -82,13 +91,14 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
 
         if batch_size > 0:
             model_c = MRGCN_Batch(n=data.num_entities, feat_size=feat_size, embed_size=embed_size,
-                                modality=modality,
-                                num_classes=data.num_classes, num_rels=2 * num_rels + 1, num_bases=bases, sampler=sampler,
-                                depth=depth)
+                                  modality=modality,
+                                  num_classes=data.num_classes, num_rels=2 * num_rels + 1, num_bases=bases,
+                                  sampler=sampler,
+                                  depth=depth)
             if sampler == 'grapes':
-                model_g = MRGCN_Batch(n=data.num_entities, feat_size=feat_size+num_indicators,
-                                           embed_size=embed_size, modality=modality, num_classes=1,
-                                           num_rels=2 * num_rels + 1, num_bases=bases, sampler=sampler, depth=depth)
+                model_g = MRGCN_Batch(n=data.num_entities, feat_size=feat_size + num_indicators,
+                                      embed_size=embed_size, modality=modality, num_classes=1,
+                                      num_rels=2 * num_rels + 1, num_bases=bases, sampler=sampler, depth=depth)
                 model_z = MRGCN_Batch(n=data.num_entities, feat_size=feat_size,
                                       embed_size=embed_size, modality=modality, num_classes=1,
                                       num_rels=2 * num_rels + 1, num_bases=bases, sampler=sampler, depth=depth)
@@ -97,30 +107,34 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
 
         else:
             model_c = MRGCN_Full(n=data.num_entities, edges=data.triples, feat_size=feat_size, embed_size=embed_size,
-                               modality=modality,
-                               num_classes=data.num_classes, num_rels=2 * num_rels + 1, num_bases=bases,
-                               self_loop_dropout=self_loop_dropout)
-
-        criterion = nn.CrossEntropyLoss()
+                                 modality=modality,
+                                 num_classes=data.num_classes, num_rels=2 * num_rels + 1, num_bases=bases,
+                                 self_loop_dropout=self_loop_dropout)
+        if multilabel:
+            criterion = nn.BCEWithLogitsLoss()
+        else:
+            criterion = nn.CrossEntropyLoss()
         model_measure = 'comps'
         if modality == 'no':
             optimizer_c = torch.optim.Adam([{'params': model_c.parameters(), 'lr': lr_c},
-                                         {'params': embed_X, 'lr': lr_c}], weight_decay=0)
+                                            {'params': embed_X, 'lr': lr_c}], weight_decay=0)
             if sampler == 'grapes':
                 # log_z = torch.tensor(log_z_init, requires_grad=True)
-                optimizer_g = torch.optim.Adam(list(model_g.parameters()) + list(model_z.parameters()), lr=lr_g, weight_decay=0)
+                optimizer_g = torch.optim.Adam(list(model_g.parameters()) + list(model_z.parameters()), lr=lr_g,
+                                               weight_decay=0)
         else:
             optimizer_c = torch.optim.Adam(model_c.parameters(), lr=lr_c, weight_decay=0)
 
         # training
-        adj_tr, adj_ts, adj_norel_tr, adj_norel_ts = adj_r_creator(data.triples, self_loop_dropout, data.num_entities, 2 * num_rels + 1, sampler)
+        adj_tr, adj_ts, adj_norel_tr, adj_norel_ts = adj_r_creator(data.triples, self_loop_dropout, data.num_entities,
+                                                                   2 * num_rels + 1, sampler)
 
         indicator_features = torch.zeros((data.num_entities, num_indicators))
         print('start training!')
         current_time = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
         folder = f'sampled_{current_time}'
-        if not os.path.exists(folder):
-            os.makedirs(folder)
+        # if not os.path.exists(folder):
+        #     os.makedirs(folder)
 
         # # shuffle
         # shuffle_idx = torch.randperm(train_idx.size(0))
@@ -130,7 +144,7 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
         for epoch in range(0, num_epochs):
             samp_num_list = [samp0, samp0]
             start_e = 0
-            pert = True
+            pert = False
             pert_ratio = 0.25
             loss_c = 0
             loss_g = 0
@@ -150,99 +164,115 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
                     batch_pert_acc = 0.
                     batch_nec = 0.
                     start = time.time()
-                    if batch_id == train_num_batches-1:
+                    if batch_id == train_num_batches - 1:
                         batch_node_idx = train_idx[batch_id * train_batch_size:]
                         batch_y_train = y_train[batch_id * train_batch_size:]
                     else:
-                        batch_node_idx = train_idx[batch_id*train_batch_size:(batch_id+1)*train_batch_size]
-                        batch_y_train = y_train[batch_id*train_batch_size:(batch_id+1)*train_batch_size]
+                        batch_node_idx = train_idx[batch_id * train_batch_size:(batch_id + 1) * train_batch_size]
+                        batch_y_train = y_train[batch_id * train_batch_size:(batch_id + 1) * train_batch_size]
 
                     batch_node_idx_s, id_sorted = batch_node_idx.sort()
                     batch_y_train_s = batch_y_train[id_sorted]
 
-                    for b in range(len(batch_node_idx_s)):
-                        indicator_features.zero_()
-                        indicator_features[batch_node_idx_s[b], -1] = 1.0
-                        adj_tr_sliced, after_nodes_list, idx_per_rel_list, nonzero_rel_list, rels_more, log_probs, log_z, \
-                            statistics, adj_tr_pert, after_nodes_list_pert = \
-                            sampler_func(sampler,
-                                                                                                               torch.unsqueeze(batch_node_idx_s[b],0),
-                                                                                                               data.num_entities,
-                                                                                                               num_rels,
-                                                                                                               adj_tr,
-                                                                                                               adj_norel_tr,
-                                                                                                               [],
-                                                                                                               samp_num_list,
-                                                                                                               depth,
-                                                                                                               model_g,
-                                                                                                               model_z,
-                                                                                                               embed_X,
-                                                                                                               indicator_features,
-                                                                                                               epoch,
-                                                                                                               start_e,
-                                                                                                               num_epochs,
-                                                                                                               pert,
-                                                                                                               pert_ratio,
-                                                                                                               device)
+                    indicator_features.zero_()
+                    indicator_features[batch_node_idx_s, -1] = 1.0
+                    adj_tr_sliced, after_nodes_list, idx_per_rel_list, nonzero_rel_list, rels_more, log_probs, log_z, \
+                    statistics, adj_tr_pert, after_nodes_list_pert = \
+                        sampler_func(sampler,
+                                     batch_node_idx_s,
+                                     data.num_entities,
+                                     num_rels,
+                                     adj_tr,
+                                     adj_norel_tr,
+                                     [],
+                                     samp_num_list,
+                                     depth,
+                                     model_g,
+                                     model_z,
+                                     embed_X,
+                                     indicator_features,
+                                     epoch,
+                                     start_e,
+                                     num_epochs,
+                                     pert,
+                                     pert_ratio,
+                                     device)
 
-                        nodes_needed = [i for j in after_nodes_list for i in j]
-                        nodes_needed = torch.unique(torch.tensor(nodes_needed, dtype=torch.int64, device=device))
-                        print("Computing embeddings for: ", len(nodes_needed), "out of ", data.num_entities)
+                    nodes_needed = [i for j in after_nodes_list for i in j]
+                    nodes_needed = torch.unique(torch.tensor(nodes_needed, dtype=torch.int64, device=device))
+                    print("Computing embeddings for: ", len(nodes_needed), "out of ", data.num_entities)
 
-                        batch_out_train, nodes_in_rels = model_c(embed_X, adj_tr_sliced,
-                                                                after_nodes_list, idx_per_rel_list,
-                                                                nonzero_rel_list, test_state, device)
-                        if pert and epoch == num_epochs - 1 :
-                            batch_out_train_pert, _ = model_c(embed_X, adj_tr_pert,
-                                                                     after_nodes_list_pert, idx_per_rel_list,
-                                                                     nonzero_rel_list, test_state, device)
-                            with torch.no_grad():
-                                batch_acc_train_pert = (batch_out_train_pert.argmax(dim=1) == torch.unsqueeze(batch_y_train_s[b], 0)).sum().item() * 100
-                                necessity = torch.abs(torch.squeeze(F.softmax(batch_out_train, dim=1))[batch_y_train_s[b]]
-                                                      - torch.squeeze(F.softmax(batch_out_train_pert, dim=1))[batch_y_train_s[b]])
-                            batch_pert_acc += batch_acc_train_pert
-                            batch_nec += necessity
-
-                        if save_model_info and epoch == 0:
-                            if batch_id == 0:
-                                nodes_in_rels_sum = nodes_in_rels
-                            else:
-                                nodes_in_rels_sum = [nodes_in_rels_sum[i] + nodes_in_rels[i] for i
-                                                     in range(len(nodes_in_rels))]
-                            if batch_id == train_num_batches - 1:
-                                nodes_in_rels_sum = [nodes_in_rels_sum[i] / train_num_batches for i
-                                                     in range(len(nodes_in_rels_sum))]
-
-                                with open(f"{data_name}_nodes_in_rels.pkl", 'wb') as f:
-                                    pkl.dump(nodes_in_rels_sum, f)
-                        optimizer_c.zero_grad()
-                        batch_loss_train += criterion(batch_out_train, torch.unsqueeze(batch_y_train_s[b], 0))
-                        if l2 != 0.0 and modality == 'no':
-                            batch_loss_train += batch_loss_train + l2 * embed_X.pow(2).sum()
-
+                    batch_out_train, nodes_in_rels = model_c(embed_X, adj_tr_sliced,
+                                                             after_nodes_list, idx_per_rel_list,
+                                                             nonzero_rel_list, test_state, device)
+                    if pert and epoch == num_epochs - 1:
+                        batch_out_train_pert, _ = model_c(embed_X, adj_tr_pert,
+                                                          after_nodes_list_pert, idx_per_rel_list,
+                                                          nonzero_rel_list, test_state, device)
                         with torch.no_grad():
-                            batch_acc_train = (batch_out_train.argmax(dim=1) == torch.unsqueeze(batch_y_train_s[b], 0)).sum().item() * 100
-                        print(f'train batch time ({time.time() - start:.4}s).')
-                        print(f'Repeat: {i}, Training Epoch: {epoch}, batch number: {batch_id}/{train_num_batches}, '
-                              f'Accuracy: {batch_acc_train}, necessity: {necessity}, Acc train pert: {batch_acc_train_pert}')
-                        acc_batch += batch_acc_train
-                        loss_batch += batch_loss_train
+                            batch_acc_train_pert = (batch_out_train_pert.argmax(
+                                dim=1) == batch_y_train_s).sum().item() / len(batch_y_train_s) * 100
+                            necessity = (torch.abs(F.softmax(batch_out_train)[batch_y_train_s] - F.softmax
+                            (batch_out_train_pert)[batch_y_train_s])).sum() / data.num_classes
+                        batch_pert_acc += batch_acc_train_pert
+                        batch_nec += necessity
 
-                        draw = True
-                        if epoch == num_epochs - 1 and draw:
-                            file_path = os.path.join(folder,
-                                                     f'{data_name}_sampled_train_epoch{epoch}_batch{batch_id}_{b}.pkl')
-                            sampled_dict = {'targets': batch_node_idx_s[b], 'after_nodes_list': after_nodes_list,
-                                            'out': batch_out_train, 'batch_y': batch_y_train_s[b]}
-                            torch.save(sampled_dict, file_path)
+                    if save_model_info and epoch == 0:
+                        if batch_id == 0:
+                            nodes_in_rels_sum = nodes_in_rels
+                        else:
+                            nodes_in_rels_sum = [nodes_in_rels_sum[i] + nodes_in_rels[i] for i
+                                                 in range(len(nodes_in_rels))]
+                        if batch_id == train_num_batches - 1:
+                            nodes_in_rels_sum = [nodes_in_rels_sum[i] / train_num_batches for i
+                                                 in range(len(nodes_in_rels_sum))]
 
-                    batch_loss_train = loss_batch/torch.tensor(len(batch_y_train_s))
+                            with open(f"{data_name}_nodes_in_rels.pkl", 'wb') as f:
+                                pkl.dump(nodes_in_rels_sum, f)
+                    optimizer_c.zero_grad()
+                    batch_loss_train += criterion(batch_out_train, batch_y_train_s)
+                    if l2 != 0.0 and modality == 'no':
+                        batch_loss_train += batch_loss_train + l2 * embed_X.pow(2).sum()
+
+                    with torch.no_grad():
+                        if multilabel:
+                            y_pred = batch_out_train > 0
+                            y_true = batch_y_train_s > 0.5
+
+                            tp = int((y_true & y_pred).sum())
+                            fp = int((~y_true & y_pred).sum())
+                            fn = int((y_true & ~y_pred).sum())
+
+                            try:
+                                precision = tp / (tp + fp)
+                                recall = tp / (tp + fn)
+                                batch_acc_train = 2 * (precision * recall) / (precision + recall) * 100
+                            except ZeroDivisionError:
+                                batch_acc_train = 0.
+                        else:
+                            batch_acc_train = (batch_out_train.argmax(dim=1) == batch_y_train_s).sum() / len(
+                                batch_y_train_s) * 100
+                    print(f'train batch time ({time.time() - start:.4}s).')
+                    print(f'Repeat: {i}, Training Epoch: {epoch}, batch number: {batch_id}/{train_num_batches}, '
+                          f'Accuracy: {batch_acc_train}, necessity: {necessity}, Acc train pert: {batch_acc_train_pert}')
+                    acc_batch += batch_acc_train
+                    loss_batch += batch_loss_train
+
+                    draw = False
+                    if epoch == num_epochs - 1 and draw:
+                        file_path = os.path.join(folder,
+                                                 f'{data_name}_sampled_train_epoch{epoch}_batch{batch_id}.pkl')
+                        sampled_dict = {'targets': batch_node_idx_s, 'after_nodes_list': after_nodes_list,
+                                        'out': batch_out_train, 'batch_y': batch_y_train_s}
+                        torch.save(sampled_dict, file_path)
+
+                    batch_loss_train = loss_batch
                     batch_loss_train.backward()
                     optimizer_c.step()
                     if sampler == 'grapes':
                         optimizer_g.zero_grad()
                         cost_gfn = batch_loss_train.detach()
-                        tot_log_prob = torch.sum(torch.cat(log_probs, dim=0))
+                        tot_log_prob = sum(t.sum() for sublist in log_probs for t in sublist)
                         # Trajectory Balance loss
                         loss_g = (log_z + tot_log_prob + loss_coef * cost_gfn) ** 2
 
@@ -260,17 +290,23 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
                                'log_z': log_z,
                                'log_probs': tot_log_prob,
                                'diff': loss_coef * cost_gfn + tot_log_prob,
-                               'batch_pert_acc': batch_pert_acc/train_batch_size,
-                               'batch_necessity': batch_nec/train_batch_size})
+                               'batch_pert_acc': batch_pert_acc / train_batch_size,
+                               'batch_necessity': batch_nec / train_batch_size})
                     log_dict = {}
                     for j, stat in enumerate(statistics):
-                        for key, value in stat.items():
-                            log_dict[f"{key}_{j}"] = value
+                        for key, value in stat[0].items():
+                            log_dict[f"{key}_{j}"] = 0
+                    for j, stat in enumerate(statistics):  # Loop through the 256 dictionaries
+                        for st in stat:
+                            for key, value in st.items():
+                                log_dict[f"{key}_{j}"] += value
+                    for key, value in log_dict.items():
+                        log_dict[key] = value / len(statistics[0])
                     wandb.log(log_dict)
 
                     loss_c += batch_loss_train
                     loss_g += batch_loss_g
-                    acc += acc_batch/train_batch_size
+                    acc += acc_batch
                     num_nodes_list.append(len(nodes_needed))
                     total_rels_more += rels_more
 
@@ -278,89 +314,106 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
                     with open(f"train_{data_name}_comps.pkl", 'wb') as f:
                         pkl.dump(layers_c, f)
 
-                epoch_tr_loss_c = loss_c/train_num_batches
+                epoch_tr_loss_c = loss_c / train_num_batches
                 epoch_tr_loss_g = loss_g / train_num_batches
-                epoch_tr_acc = acc/train_num_batches
+                epoch_tr_acc = acc / train_num_batches
 
                 print(f'Repeat: {i}, Epoch: {epoch}, final Train Accuracy: {epoch_tr_acc}, Loss gc: '
                       f'{epoch_tr_loss_c.item()}, Loss gf: {epoch_tr_loss_g},  Average num nodes needed: '
-                      f'{np.mean(num_nodes_list)}, Average num edges:{total_num_edges/train_num_batches}, '
-                      f'rels_more: {total_rels_more/train_num_batches}')
+                      f'{np.mean(num_nodes_list)}, Average num edges:{total_num_edges / train_num_batches}, '
+                      f'rels_more: {total_rels_more / train_num_batches}')
                 if i == 0:
                     log_dict = {'epoch': epoch,
                                 'train_epoch_loss_c': epoch_tr_loss_c,
                                 'train_epoch_loss_g': epoch_tr_loss_g,
                                 'train_epoch_acc': epoch_tr_acc,
                                 'num_nodes_needed': np.mean(num_nodes_list),
-                                'num_edges': total_num_edges/train_num_batches}
+                                'num_edges': total_num_edges / train_num_batches}
                     wandb.log(log_dict)
 
                 # Saving the model
-                if saving and (epoch % (num_epochs//3) == (num_epochs//3 - 1) or epoch == (num_epochs-1)):
+                if saving and (epoch % (num_epochs // 3) == (num_epochs // 3 - 1) or epoch == (num_epochs - 1)):
                     save_filename = f'model_bsize%s_{data_name}_%s.pth' % (batch_size, epoch)
                     save_path = os.path.join('./savedModels', save_filename)
                     torch.save(model_c.state_dict(), save_path)
-                    embed_file_name = f'embeddings_bsize%s_{data_name}_%s.pkl' %(batch_size, epoch)
+                    embed_file_name = f'embeddings_bsize%s_{data_name}_%s.pkl' % (batch_size, epoch)
                     save_path = os.path.join('./savedModels', embed_file_name)
                     with open(save_path, 'wb') as f:
                         pkl.dump(embed_X, f)
 
-            # testing
+                # testing
                 model_c.eval()
                 model_g.eval()
                 loss = 0
                 acc = 0
                 if (test_state == 'LDRN' or test_state == 'full-mini') and testing:
                     for batch_id in range(0, test_num_batches):
-                        if batch_id == test_num_batches-1:
-                            batch_node_idx = test_idx[batch_id*test_batch_size:]
-                            batch_y_test = y_test[batch_id*test_batch_size:]
+                        if batch_id == test_num_batches - 1:
+                            batch_node_idx = test_idx[batch_id * test_batch_size:]
+                            batch_y_test = y_test[batch_id * test_batch_size:]
                         else:
-                            batch_node_idx = test_idx[batch_id*test_batch_size:(batch_id+1)*test_batch_size]
-                            batch_y_test = y_test[batch_id*test_batch_size:(batch_id+1)*test_batch_size]
+                            batch_node_idx = test_idx[batch_id * test_batch_size:(batch_id + 1) * test_batch_size]
+                            batch_y_test = y_test[batch_id * test_batch_size:(batch_id + 1) * test_batch_size]
 
                         batch_node_idx_s, id_sorted = batch_node_idx.sort()
                         batch_y_test_s = batch_y_test[id_sorted]
-
+                        # IMPORTANT: at the moment sampling in test is not done per node, but still per batch_size
                         samp_num_list = [test_batch_size, test_batch_size]
                         indicator_features.zero_()
                         indicator_features[batch_node_idx_s, -1] = 1.0
                         adj_ts_sliced, after_nodes_list, idx_per_rel_list, nonzero_rel_list, rels_more, log_probs, \
                         log_z, _, _, _ = sampler_func(sampler,
-                                         batch_node_idx_s,
-                                         data.num_entities,
-                                         num_rels,
-                                         adj_ts,
-                                         adj_norel_ts,
-                                         [],
-                                         samp_num_list,
-                                         depth,
-                                         model_g,
-                                         model_z,
-                                         embed_X,
-                                         indicator_features,
-                                         epoch,
-                                         start_e,
-                                         num_epochs,
-                                         False,
-                                         pert_ratio,
-                                         device)
+                                                      batch_node_idx_s,
+                                                      data.num_entities,
+                                                      num_rels,
+                                                      adj_ts,
+                                                      adj_norel_ts,
+                                                      [],
+                                                      samp_num_list,
+                                                      depth,
+                                                      model_g,
+                                                      model_z,
+                                                      embed_X,
+                                                      indicator_features,
+                                                      epoch,
+                                                      start_e,
+                                                      num_epochs,
+                                                      False,
+                                                      pert_ratio,
+                                                      device)
                         batch_out_test, _ = model_c(embed_X, adj_ts_sliced,
-                                                            after_nodes_list, idx_per_rel_list,
-                                                            nonzero_rel_list, test_state, device)
+                                                    after_nodes_list, idx_per_rel_list,
+                                                    nonzero_rel_list, test_state, device)
 
                         batch_loss_test = criterion(batch_out_test, batch_y_test_s)  ###### TODO: l2 penalty #######
                         with torch.no_grad():
-                            batch_acc_test = (batch_out_test.argmax(dim=1) == batch_y_test_s).sum().item()/len(batch_y_test_s) * 100
-                        print("Repeat", i, ", Testing Epoch: ", epoch, " , batch number: ", batch_id, "/", test_num_batches, "Accuracy:",
+                            if multilabel:
+                                y_pred = batch_out_test > 0
+                                y_true = batch_y_test_s > 0.5
+
+                                tp = int((y_true & y_pred).sum())
+                                fp = int((~y_true & y_pred).sum())
+                                fn = int((y_true & ~y_pred).sum())
+
+                                try:
+                                    precision = tp / (tp + fp)
+                                    recall = tp / (tp + fn)
+                                    batch_acc_test = 2 * (precision * recall) / (precision + recall) * 100
+                                except ZeroDivisionError:
+                                    batch_acc_test = 0.
+                            else:
+                                batch_acc_test = (batch_out_test.argmax(dim=1) == batch_y_test_s).sum().item() / len(
+                                    batch_y_test_s) * 100
+                        print("Repeat", i, ", Testing Epoch: ", epoch, " , batch number: ", batch_id, "/",
+                              test_num_batches, "Accuracy:",
                               batch_acc_test)
 
                         loss += batch_loss_test
                         acc += batch_acc_test
 
                         if epoch == num_epochs - 1 and draw:
-                                # plot_graph(batch_node_idx_s, data, after_nodes_list, batch_out_train, batch_y_train_s,
-                                # y_train)
+                            # plot_graph(batch_node_idx_s, data, after_nodes_list, batch_out_train, batch_y_train_s,
+                            # y_train)
                             file_path = os.path.join(folder,
                                                      f'{data_name}_sampled_test_epoch{epoch}_batch{batch_id}.pkl')
                             sampled_dict = {'targets': batch_node_idx_s, 'after_nodes_list': after_nodes_list,
@@ -428,7 +481,7 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
                     wandb.log({"train_epoch_loss": loss_train.detach(), 'epoch': epoch})
                     wandb.log({"train_epoch_acc": acc_train, 'epoch': epoch})
                 # Get layer norm in the end of training, subtract the initial norm and save
-                if save_model_info and epoch == num_epochs -1:
+                if save_model_info and epoch == num_epochs - 1:
                     layer1_norm_end = torch.linalg.matrix_norm(
                         torch.einsum('rb, beh -> reh', model_c.rgcn.comps1, model_c.rgcn.bases1))
                     layer2_norm_end = torch.linalg.matrix_norm(
@@ -460,7 +513,3 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
 if __name__ == '__main__':
     print('arguments ', ' '.join(sys.argv))
     fire.Fire(go)
-
-
-
-
