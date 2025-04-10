@@ -592,7 +592,23 @@ def sample_neighborhoods_from_probs(logits, num_samples, test, current_e, start_
     n = logits.size(0)
     if k >= n:
         logprobs = torch.nn.functional.logsigmoid(logits.squeeze(-1))
-        return torch.arange(0, len(logits)), logprobs, {}
+        b = Bernoulli(logits=logits.squeeze())
+        entropy = -(b.probs * (b.probs).log2() + (1 - b.probs) * (1 - b.probs).log2())
+
+        min_prob = b.probs.min(-1)[0]
+        max_prob = b.probs.max(-1)[0]
+
+        if torch.isnan(entropy).any():
+            nan_ind = torch.isnan(entropy)
+            entropy[nan_ind] = 0.0
+
+        std_entropy, mean_entropy = torch.std_mean(entropy)
+        stats_dict = {"min_prob": min_prob,
+                      "max_prob": max_prob,
+                      "mean_entropy": mean_entropy,
+                      "std_entropy": std_entropy}
+
+        return torch.arange(0, len(logits)), logprobs, stats_dict
     assert k < n
     assert k > 0
 
@@ -775,7 +791,7 @@ def grapes_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, s
     previous_nodes = batch_idx
     previous_nodes_pert = batch_idx
 
-    if not(model_g.training):
+    if batch_idx[0] < 0: #not(model_g.training):
         for d in range(depth):
             neighbors = get_neighbours_sparse(A_en, previous_nodes)
             mask = ~torch.isin(neighbors, previous_nodes)
@@ -861,7 +877,7 @@ def grapes_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, s
             stats.append(statistics)
             # non_zero_rel_list.append(nonzero_rels)
     else:
-        sampled_set = [[],[]]
+        sampled_set = [set(), set()]
         log_probs = [[],[]]
         stats = [[],[]]
         log_z = []
@@ -901,13 +917,13 @@ def grapes_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, s
                 else:
                     after_nodes = batch_idx
 
-                sampled_set[d].append(after_nodes) # record what has been sampled in each hop
+                sampled_set[d].update(after_nodes.tolist()) # record what has been sampled in each hop
                 after_nodes = torch.unique(torch.cat((after_nodes, batch_idx.to('cpu'))))
                 previous_nodes = after_nodes
                 stats[d].append(statistics)
         previous_nodes = batch_idx
         for d in range(depth):
-            after_nodes = torch.unique(torch.cat((torch.tensor(sampled_set[d]), batch_idx.to('cpu'))))
+            after_nodes = torch.unique(torch.cat((torch.tensor(list(sampled_set[d])), batch_idx.to('cpu'))))
             cols = getAdjacencyNodeColumnIdx(after_nodes, num_nodes, 2 * num_rels + 1)
             col_ind.append(cols)
             # sample A
