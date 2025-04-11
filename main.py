@@ -290,8 +290,8 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
                                'log_z': log_z,
                                'log_probs': tot_log_prob,
                                'diff': loss_coef * cost_gfn + tot_log_prob,
-                               'batch_pert_acc': batch_pert_acc / train_batch_size,
-                               'batch_necessity': batch_nec / train_batch_size})
+                               'batch_pert_acc': batch_pert_acc / len(batch_y_train),
+                               'batch_necessity': batch_nec / len(batch_y_train)})
                     log_dict = {}
                     for j, stat in enumerate(statistics):
                         for key, value in stat[0].items():

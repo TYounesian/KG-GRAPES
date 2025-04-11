@@ -931,7 +931,7 @@ def grapes_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, s
                 slice_adj_row_col(A_en, previous_nodes, cols, len(previous_nodes), len(after_nodes), 'cl').to(
                     device))
             if pert:
-                after_nodes_pert = torch.tensor(sampled_set[d])[torch.randperm(len(sampled_set[d]))[:int(len(sampled_set[d]) * (1 - pert_ratio))]]
+                after_nodes_pert = torch.tensor(list(sampled_set[d]))[torch.randperm(len(sampled_set[d]))[:int(len(sampled_set[d]) * (1 - pert_ratio))]]
                 after_nodes_pert = torch.unique(torch.cat((after_nodes_pert, batch_idx.to('cpu'))))
                 cols = getAdjacencyNodeColumnIdx(after_nodes_pert, num_nodes, 2 * num_rels + 1)
                 col_ind.append(cols)
