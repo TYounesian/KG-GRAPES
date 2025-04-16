@@ -915,10 +915,10 @@ def grapes_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, s
                     after_nodes = only_neighbors[idx_local]  # unique node idx
                     print("after nodes:", torch.unique(after_nodes))
                 else:
-                    after_nodes = batch_idx
+                    after_nodes = b
 
                 sampled_set[d].update(after_nodes.tolist()) # record what has been sampled in each hop
-                after_nodes = torch.unique(torch.cat((after_nodes, batch_idx.to('cpu'))))
+                after_nodes = torch.unique(torch.cat((after_nodes, torch.unsqueeze(b, dim=0).to('cpu'))))
                 previous_nodes = after_nodes
                 stats[d].append(statistics)
         previous_nodes = batch_idx
