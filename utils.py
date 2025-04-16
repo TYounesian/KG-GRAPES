@@ -890,6 +890,7 @@ def grapes_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, s
                     only_neighbors = neighbors[mask]
                 else:
                     only_neighbors = neighbors
+                    mask = torch.ones_like(neighbors, dtype=torch.bool)
                 cols = getAdjacencyNodeColumnIdx(previous_nodes, num_nodes, 2*num_rels+1)
                 # A_en_row = slice_rows_tensor2(A_en, previous_nodes)
                 A_gf = slice_adj_row_col(A_en, neighbors, cols, len(neighbors), len(previous_nodes), 'prob')
