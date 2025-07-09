@@ -34,7 +34,7 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
         "saving": saving, "repeat": repeat, "lr_embed": lr_embed
     }
 
-    wandb.init(project=project, entity='tyou', mode='online' if log_wandb else 'disabled', config=config)
+    wandb.init(project=project, entity='tyou', mode='online' if log_wandb else 'disabled', config=config, dir='wandb_logs')
 
     if os.path.isfile(f"data_{data_name}_final_{final}.pkl"):
         print(f'Using cached data {data_name}.')
@@ -52,7 +52,7 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
     y_test = data.withheld[:, 1].long()
     test_idx = data.withheld[:, 0].long()
     num_rels = data.num_relations
-
+    #import pdb; pdb.set_trace()
     multilabel = False
     if multilabel:
         y_train = data.training[:, 1:].long()
@@ -86,7 +86,7 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
             embed_X = extract_embeddings(data, feat_size)
         else:  # If RGCN
             embed_X = nn.Parameter(torch.FloatTensor(data.num_entities, feat_size), requires_grad=True)
-            # nn.init.xavier_uniform_(embed_X, gain=nn.init.calculate_gain('relu'))
+            #nn.init.xavier_uniform_(embed_X, gain=nn.init.calculate_gain('relu'))
             nn.init.kaiming_normal_(embed_X, mode='fan_in')
 
         if batch_size > 0:
@@ -118,13 +118,13 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
         if modality == 'no':
             optimizer_c = torch.optim.Adam([{'params': model_c.parameters(), 'lr': lr_c},
                                             {'params': embed_X, 'lr': lr_c}], weight_decay=0)
-            if sampler == 'grapes':
-                # log_z = torch.tensor(log_z_init, requires_grad=True)
-                optimizer_g = torch.optim.Adam(list(model_g.parameters()) + list(model_z.parameters()), lr=lr_g,
-                                               weight_decay=0)
         else:
             optimizer_c = torch.optim.Adam(model_c.parameters(), lr=lr_c, weight_decay=0)
 
+        if sampler == 'grapes':
+                # log_z = torch.tensor(log_z_init, requires_grad=True)
+                optimizer_g = torch.optim.Adam(list(model_g.parameters()) + list(model_z.parameters()), lr=lr_g,
+                                               weight_decay=0)
         # training
         adj_tr, adj_ts, adj_norel_tr, adj_norel_ts = adj_r_creator(data.triples, self_loop_dropout, data.num_entities,
                                                                    2 * num_rels + 1, sampler)
@@ -137,13 +137,13 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
         #     os.makedirs(folder)
 
         # # shuffle
-        # shuffle_idx = torch.randperm(train_idx.size(0))
-        # train_idx = train_idx[shuffle_idx]
-        # y_train = y_train[shuffle_idx]
-
+        shuffle_idx = torch.randperm(train_idx.size(0))
+        train_idx = train_idx[shuffle_idx]
+        y_train = y_train[shuffle_idx]
+        sampled_r = [[], []]
         for epoch in range(0, num_epochs):
             samp_num_list = [samp0, samp0]
-            start_e = 0
+            start_e = num_epochs #- 5
             pert = False
             pert_ratio = 0.25
             loss_c = 0
@@ -173,7 +173,7 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
 
                     batch_node_idx_s, id_sorted = batch_node_idx.sort()
                     batch_y_train_s = batch_y_train[id_sorted]
-
+                    
                     indicator_features.zero_()
                     indicator_features[batch_node_idx_s, -1] = 1.0
                     adj_tr_sliced, after_nodes_list, idx_per_rel_list, nonzero_rel_list, rels_more, log_probs, log_z, \
@@ -184,7 +184,7 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
                                      num_rels,
                                      adj_tr,
                                      adj_norel_tr,
-                                     [],
+                                     data,
                                      samp_num_list,
                                      depth,
                                      model_g,
@@ -201,7 +201,20 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
                     nodes_needed = [i for j in after_nodes_list for i in j]
                     nodes_needed = torch.unique(torch.tensor(nodes_needed, dtype=torch.int64, device=device))
                     print("Computing embeddings for: ", len(nodes_needed), "out of ", data.num_entities)
-
+                    #import pdb;pdb.set_trace()
+                    
+                    #sampled_r0, sampled_r1 = analyze_subgraph(data, after_nodes_list, batch_node_idx_s)
+                    #print(f'1st hop sampled relations {sampled_r0}')
+                    #print(f'2nd hop sampled relations {sampled_r1}')
+                    if epoch == 0 or epoch == int(num_epochs/2) or epoch == num_epochs - 1:
+                        sampled_r0, sampled_r1 = analyze_subgraph(data, after_nodes_list, batch_node_idx_s)
+                        print(f'1st hop sampled relations {sampled_r0}')
+                        print(f'2nd hop sampled relations {sampled_r1}')
+                        sampled_r[0].append(sampled_r0)
+                        sampled_r[1].append(sampled_r1)
+                    if epoch == num_epochs -1:
+                        if batch_id == train_num_batches-1:
+                            print(f'final sampled relations: {sampled_r}') 
                     batch_out_train, nodes_in_rels = model_c(embed_X, adj_tr_sliced,
                                                              after_nodes_list, idx_per_rel_list,
                                                              nonzero_rel_list, test_state, device)
@@ -293,15 +306,21 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
                                'batch_pert_acc': batch_pert_acc / len(batch_y_train),
                                'batch_necessity': batch_nec / len(batch_y_train)})
                     log_dict = {}
-                    for j, stat in enumerate(statistics):
-                        for key, value in stat[0].items():
-                            log_dict[f"{key}_{j}"] = 0
-                    for j, stat in enumerate(statistics):  # Loop through the 256 dictionaries
-                        for st in stat:
-                            for key, value in st.items():
-                                log_dict[f"{key}_{j}"] += value
-                    for key, value in log_dict.items():
-                        log_dict[key] = value / len(statistics[0])
+                    node_wise = False
+                    if node_wise:
+                        for j, stat in enumerate(statistics):
+                            for key, value in stat[0].items():
+                               log_dict[f"{key}_{j}"] = 0
+                        for j, stat in enumerate(statistics):  # Loop through the 256 dictionaries
+                            for st in stat:
+                                for key, value in st.items():
+                                    log_dict[f"{key}_{j}"] += value
+                        for key, value in log_dict.items():
+                            log_dict[key] = value / len(statistics[0])
+                    else:
+                        for j, stat in enumerate(statistics):
+                            for key, value in stat.items():
+                                log_dict[f"{key}_{j}"] = value
                     wandb.log(log_dict)
 
                     loss_c += batch_loss_train
@@ -368,7 +387,7 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
                                                       num_rels,
                                                       adj_ts,
                                                       adj_norel_ts,
-                                                      [],
+                                                      data,
                                                       samp_num_list,
                                                       depth,
                                                       model_g,

@@ -511,7 +511,7 @@ class LADIES_Mini_Batch_ERGCN(nn.Module):  # ergcn - rgcn with node embeddings
             h2 = torch.einsum('nh, rhc -> rnc', h1, w).contiguous()
             h2 = h2.view(self.num_rels * n1, c)
             h2 = torch.mm(A_en_sliced, h2)
-
+            print("---------hi---------")
             return h2 + self.bias2
 
     def penalty(self, p=2):

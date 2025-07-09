@@ -197,7 +197,7 @@ def extract_embeddings(data, feat_size):
         trainable = trainable.cuda()
         constant = constant.cuda()
     embed_X = torch.cat([trainable, constant], dim=0)
-    pdb.set_trace()
+    #pdb.set_trace()
     global bmodel
     global cnnmodel
     del bmodel

@@ -14,6 +14,7 @@ from torch.distributions import Bernoulli, Gumbel
 import networkx as nx
 import matplotlib.pyplot as plt
 import math
+import wandb
 
 
 def d(tensor=None):
@@ -72,7 +73,7 @@ def get_neighbours_sparse(A, idx):
     of idx irrespective of the relations.
     """
     n, rn = A.size()
-
+    #import pdb;pdb.set_trace()
     isin = torch.isin(A._indices()[0], idx.to(A.device))
     col = A._indices()[1][torch.where(isin)[0]]
     neighbours_global = torch.unique(col % n)
@@ -438,7 +439,7 @@ def get_splits(y, train_idx, test_idx, validation=True):
     return y_train, y_val, y_test, idx_train, idx_val, idx_test
 
 
-def sampler_func(sampler, batch_id, num_nodes, num_rels, horizontal_en_A_tr, norel_A_tr, A_sep, samp_num_list, depth,
+def sampler_func(sampler, batch_id, num_nodes, num_rels, horizontal_en_A_tr, norel_A_tr, data, samp_num_list, depth,
             model_g, model_z, embed_X, indicator_features, current_e, start_e, end_e, pert, pert_ratio, device):
     if sampler == 'full-mini-batch':
         A_en_sliced, after_nodes_list, rels_more = full_mini_sampler(batch_id, num_nodes,
@@ -446,6 +447,7 @@ def sampler_func(sampler, batch_id, num_nodes, num_rels, horizontal_en_A_tr, nor
         idx_per_rel_list = []
         nonzero_rel_list = []
         log_probs = 0
+        statistics = []
         log_z = 0
         A_en_sliced_pert = []
         after_nodes_list_pert = []
@@ -469,7 +471,9 @@ def sampler_func(sampler, batch_id, num_nodes, num_rels, horizontal_en_A_tr, nor
                 end_e,
                 pert,
                 pert_ratio,
-                device)
+                device,
+                data,
+                norel_A_tr)
     elif sampler == 'LDUN':
         A_en_sliced, after_nodes_list, idx_per_rel_list, nonzero_rel_list, rels_more = ladies_norel_sampler(batch_id,
                                                                                                             samp_num_list,
@@ -479,7 +483,8 @@ def sampler_func(sampler, batch_id, num_nodes, num_rels, horizontal_en_A_tr, nor
                                                                                                             horizontal_en_A_tr,
                                                                                                             depth,
                                                                                                             sampler,
-                                                                                                            device)
+                                                                                                            device,
+                                                                                                            data)
         log_probs = 0.
         log_z = 0.
         statistics = []
@@ -496,6 +501,7 @@ def sampler_func(sampler, batch_id, num_nodes, num_rels, horizontal_en_A_tr, nor
                                                                                                       device)
         log_probs = 0.
         log_z = 0.
+        statistics = []
         A_en_sliced_pert = []
         after_nodes_list_pert = []
     elif sampler == 'hetero':
@@ -555,7 +561,8 @@ def adj_r_creator(edges, self_loop_dropout, num_nodes, num_rels, sampler):
     hor_en_adj_ts = torch.sparse.FloatTensor(indices=hor_en_ind_ts.t(), values=vals_en_ts, size=hor_en_size_ts)
     norel_A_tr = []
     norel_A_ts = []
-    if sampler == 'LDUN':
+    if sampler == 'LDUN' or sampler == 'grapes':
+        edges_en_self = enrich_self(edges, num_nodes, num_rels)
         norel_ind_tr, norel_size_tr = adj_norel(edges_en_tr, num_nodes)
 
         norel_vals_en_tr = torch.ones(norel_ind_tr.size(0), dtype=torch.float)
@@ -573,6 +580,20 @@ def adj_r_creator(edges, self_loop_dropout, num_nodes, num_rels, sampler):
                                               size=norel_size_ts)
 
     return hor_en_adj_tr, hor_en_adj_ts, norel_A_tr, norel_A_ts
+
+
+def enrich_self(triples, n, r):
+    cuda = triples.is_cuda
+
+    self_loops = torch.arange(n, dtype=torch.long,  device=d(cuda))[:, None]
+
+    selfloops = torch.cat([
+        self_loops,
+        torch.full((len(self_loops), 1), fill_value=r),
+        self_loops,
+    ], dim=1)
+
+    return torch.cat([triples, selfloops], dim=0)
 
 
 def sample_neighborhoods_from_probs(logits, num_samples, test, current_e, start_e, end_e):
@@ -611,17 +632,17 @@ def sample_neighborhoods_from_probs(logits, num_samples, test, current_e, start_
         return torch.arange(0, len(logits)), logprobs, stats_dict
     assert k < n
     assert k > 0
-
+    #import pdb; pdb.set_trace()
     # shuffle logits
     shuffle_idx = torch.randperm(logits.size(0))
     logits = logits[shuffle_idx]
-    test = True
+    #test = True
     b = Bernoulli(logits=logits.squeeze())
     # Gumbel-sort trick https://timvieira.github.io/blog/post/2014/08/01/gumbel-max-trick-and-weighted-reservoir-sampling/
-    gumbel = Gumbel(torch.tensor(0., device=logits.device), torch.tensor(1., device=logits.device))
+    gumbel = Gumbel(torch.tensor(0., device=logits.device), torch.tensor(0.01, device=logits.device))
     gumbel_noise = gumbel.sample((n,))
     if current_e < start_e:
-        perturbed_log_probs = b.probs.log() + gumbel_noise
+        perturbed_log_probs = b.probs.log() #+ gumbel_noise
     else:
         # decay = math.log(1 / 1e-6) / (end_e - start_e)
         # gumbel_noise = gumbel_noise * math.exp(-decay * (current_e - start_e + 1)) #* b.probs.log().std()
@@ -633,27 +654,27 @@ def sample_neighborhoods_from_probs(logits, num_samples, test, current_e, start_
         # min_noise = 1e-3
         # gumbel_noise = gumbel_noise * tau + min_noise
         # print(f'gumbel noise: {gumbel_noise} at epoch {current_e}')
-        perturbed_log_probs = b.probs.log() + torch.rand(n, device=logits.device)*1e-2 #+ gumbel_noise
+        perturbed_log_probs = b.probs.log() #+ torch.rand(n, device=logits.device)*1e-2 #+ gumbel_noise 
     if test:
-        samples = torch.topk(b.probs, k=k, dim=0, sorted=False)[1].to('cpu')#torch.topk(b.probs+torch.rand(n)*1e-2, k=k, dim=0, sorted=False)[1].to('cpu')
+        samples = torch.topk(b.probs, k=k, dim=0, sorted=False)[1].to('cpu') #torch.topk(b.probs+torch.rand(n)*1e-2, k=k, dim=0, sorted=False)[1].to('cpu')
         # samples = torch.arange(k)
         # samples = torch.sort(b.probs)[1][-k:].to('cpu')
     else:
         samples = torch.topk(perturbed_log_probs, k=k, dim=0, sorted=False)[1].to('cpu')
-
-    # print("probs:", " ".join(f"{p:.5f}" for p in torch.sort(b.probs[samples], descending=True).values))
+        #samples = b.probs.multinomial(k, replacement=False) 
+    #print("probs:", " ".join(f"{p:.5f}" for p in torch.sort(b.probs[samples], descending=True).values))
     #print("samples:", torch.sort(samples).values)
-
+    #print(f'sampled probs mean {b.probs[samples].mean()}, max {b.probs[samples].max()}, min {b.probs[samples].min()}')
     # shuffle back
     samples = shuffle_idx[samples]
     #print("samples shuffled:", samples)
 
-    # print("shared between probs and perturbed:",
-    #       len(set(torch.topk(b.probs, k=k, dim=0, sorted=False)[1].to('cpu').tolist()) &
-    #           set(torch.topk(perturbed_log_probs, k=k, dim=0, sorted=False)[1].to('cpu').tolist())))
-    # print("shared between noise and perturbed:",
-    #       len(set(torch.topk(gumbel_noise, k=k, dim=0, sorted=False)[1].to('cpu').tolist()) &
-    #           set(torch.topk(perturbed_log_probs, k=k, dim=0, sorted=False)[1].to('cpu').tolist())))
+    print("shared between probs and perturbed:",
+          len(set(torch.topk(b.probs.log(), k=k, dim=0, sorted=False)[1].to('cpu').tolist()) &
+              set(torch.topk(perturbed_log_probs, k=k, dim=0, sorted=False)[1].to('cpu').tolist())))
+    print("shared between perturbed and noise:",
+          len(set(torch.topk(perturbed_log_probs, k=k, dim=0, sorted=False)[1].to('cpu').tolist()) &
+              set(torch.topk(gumbel_noise, k=k, dim=0, sorted=False)[1].to('cpu').tolist())))
     # calculate the entropy in bits
     entropy = -(b.probs * (b.probs).log2() + (1 - b.probs) * (1 - b.probs).log2())
 
@@ -777,7 +798,7 @@ def fastgcn_plus_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, de
 
 
 def grapes_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, sampler, model_g, model_z, embed_X,
-                   indicator_features, current_e, start_e, end_e, pert, pert_ratio, device):
+                   indicator_features, current_e, start_e, end_e, pert, pert_ratio, device, data, nore_A):
     col_ind = []
     A_en_sliced = []
     A_en_sliced_pert = []
@@ -791,16 +812,26 @@ def grapes_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, s
     previous_nodes = batch_idx
     previous_nodes_pert = batch_idx
 
-    if batch_idx[0] < 0: #not(model_g.training):
+    if True: #batch_idx[0] < 0: #not(model_g.training):
         for d in range(depth):
+            #import pdb;pdb.set_trace()
             neighbors = get_neighbours_sparse(A_en, previous_nodes)
             mask = ~torch.isin(neighbors, previous_nodes)
             only_neighbors = neighbors[mask]
-            cols = getAdjacencyNodeColumnIdx(previous_nodes, num_nodes, 2*num_rels+1)
-            # A_en_row = slice_rows_tensor2(A_en, previous_nodes)
-            A_gf = slice_adj_row_col(A_en, neighbors, cols, len(neighbors), len(previous_nodes), 'prob')
+            #import pdb;pdb.set_trace()
+            only_neighb_ents = [data.i2e[t][0] for t in torch.unique(only_neighbors).tolist()]
+            target_prefix = "http://purl.org/collections/nl/am/proxy-"
+            blank_prefix = "_:N"
+            person_prefix = "http://purl.org/collections/nl/am/p-"
+            aggreg_prefix = "http://purl.org/collections/nl/am/aggregation-"
+            physical_prefix = "http://purl.org/collections/nl/am/physical-"
+            print(f'percent only neighbors {sum(str(x).startswith(target_prefix) and str(x)[len(target_prefix):].isdigit() for x in only_neighb_ents)/len(only_neighb_ents)} count {sum(str(x).startswith(target_prefix) and str(x)[len(target_prefix):].isdigit() for x in only_neighb_ents)}')
+            cols = getAdjacencyNodeColumnIdx(neighbors, num_nodes, 2*num_rels+1)
+            A_en_row = slice_rows_tensor2(A_en, previous_nodes)
+            #num_prev_nodes = len(previous_nodes)
+            A_gf = slice_adj_row_col(A_en, neighbors, cols, len(neighbors), len(neighbors), 'cl')
             # calculate the importance of each neighbor
-            indicator_features[only_neighbors, d] = 1.0
+            indicator_features[neighbors, d] = 1.0
             # batch_nodes = neighbors[~torch.isin(neighbors, previous_nodes)]
             x = torch.cat([embed_X[neighbors],
                         indicator_features[neighbors]],
@@ -810,11 +841,49 @@ def grapes_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, s
                 pred_z, _ = model_z(embed_X[neighbors], A_gf.to(device), neighbors, [], [], 'full', device)
                 log_z = pred_z.mean()
 
+            # Testing how LDUN works within this setup
+            #import pdb;pdb.set_trace()
+            A_row = slice_rows_tensor2(nore_A, previous_nodes)
+            #cols_neighb = getAdjacencyNodeColumnIdx(neighbors, num_nodes, 2*num_rels+1)
+            #A_row_col = slice_adj_row_col(nore_A, previous_nodes, cols_neighb, len(previous_nodes), len(neighbors), 'cl').to(device)
+            #A_en_row = slice_rows_tensor2(A_en, previous_nodes)
+            size = [len(previous_nodes), num_nodes]
+            pi = calc_prob(A_row, size, 1, device)
+            num_prev_nodes = len(previous_nodes)
+            sum_pi = pi.sum()
+            p = pi / pi.max() #sum_pi
+            p = p[neighbors]
+            #import pdb;pdb.set_trace()
+            ldun_logits = torch.logit(p.clamp(min=1e-6, max=1 - 1e-6))
+            #b = Bernoulli(logits=ldun_logits.squeeze())
+            #print(f'ldun p {p}')
+            #print(f'ldun logit p {b.probs}')
+            #print(f'p diff max {(p-b.probs).max()}')
+            #pdb.set_trace()
+            s_num = samp_num_list[d]
+            if s_num > 0:
+                idx_local, nonzero_rels, global_idx, prob, rels_more = sel_idx_node(p, s_num, len(neighbors), 1)
+                idx_list_per_rel = []
+                after_nodes_l = neighbors[idx_local]  # unique node idx
+                print(f'num after nodes LDUN: {torch.unique(torch.cat((after_nodes_l, batch_idx))).size()}')
+                #print(f"LDUN after nodes: {torch.unique(after_nodes_l)}")
+                after_ents_l = [data.i2e[t][0] for t in after_nodes_l.tolist() if data.i2e[t][1] != 'http://kgbench.info/dt#base64Image']
+                print(f'target ratio {sum(str(x).startswith(target_prefix) and str(x)[len(target_prefix):].isdigit() for x in after_ents_l)/s_num} count {sum(str(x).startswith(target_prefix) and str(x)[len(target_prefix):].isdigit() for x in after_ents_l)}')
+                print(f'blank count {sum(str(x).startswith(blank_prefix) for x in after_ents_l)/s_num}')
+                print(f'person count {sum(str(x).startswith(person_prefix) and str(x)[len(person_prefix):].isdigit() for x in after_ents_l)/s_num}')
+                print(f'aggreg count {sum(str(x).startswith(aggreg_prefix) and str(x)[len(aggreg_prefix):].isdigit() for x in after_ents_l)/s_num}')
+                print(f'physical count {sum(str(x).startswith(physical_prefix) and str(x)[len(physical_prefix):].isdigit() for x in after_ents_l)/s_num}')
+                print(f'LDUN common with train {torch.isin(data.training[:,0].long(), torch.unique(after_nodes_l)).sum()} common with test {torch.isin(data.withheld[:,0].long(), torch.unique(after_nodes_l)).sum()}') 
+                #print(f'after_nodes_ent LDUN: {after_ents_l}')
+
             # calculate the probability of sampling each neighbor in each relation
             # output the relations that appear in at least one neighbor
-
-            node_logits = node_logits[mask]
+            #pdb.set_trace()
+            #node_logits = node_logits[mask]
             s_num = samp_num_list[d]
+            node_logits_l = node_logits * 1e-4 + ldun_logits.to(device) 
+            print(f'GFN logits mean: {node_logits.mean()}, LDUN logits: {ldun_logits.mean()}')
+            wandb.log({'GRAPES mean logits': node_logits.mean(), 'LDUN mean logits': ldun_logits.mean()})
             if s_num > 0:
                 idx_local, log_prob, statistics = sample_neighborhoods_from_probs(
                     node_logits,
@@ -828,28 +897,37 @@ def grapes_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, s
                 # output the local and global idx of the neighbors, the probability of the nodes sampled
                 # idx_local, nonzero_rels, global_idx, prob, rels_more = sel_idx_node(p, s_num, num_nodes, num_rels)
                 idx_list_per_rel = []
-                after_nodes = only_neighbors[idx_local]  # unique node idx
-                print("after nodes:", torch.unique(after_nodes))
+                after_nodes_r = neighbors[torch.randperm(len(neighbors))[:s_num]] 
+                after_nodes = neighbors[idx_local]  # unique node idx
+                print(f'num after nodes GRAPES: {torch.unique(torch.cat((after_nodes, batch_idx))).size()}')
+                #print(f'count {sum(str(x).startswith(prefix) and str(x)[len(prefix):].isdigit() for x in after_nodes)}')
+                #import pdb;pdb.set_trace()
+                #sampled_test = [t for t in torch.unique(after_nodes).tolist() if data.i2e[t][1] != 'http://kgbench.info/dt#base64Image']
+                after_ents = [data.i2e[t][0] for t in torch.unique(after_nodes).tolist() if data.i2e[t][1] != 'http://kgbench.info/dt#base64Image']
+                after_ents_r = [data.i2e[t][0] for t in torch.unique(after_nodes_r).tolist() if data.i2e[t][1] != 'http://kgbench.info/dt#base64Image']
+                neighbors_ents = [data.i2e[t][0] for t in torch.unique(neighbors).tolist() if data.i2e[t][1] != 'http://kgbench.info/dt#base64Image']
+                #print(f'neigbors count {sum(str(x).startswith(prefix) and str(x)[len(prefix):].isdigit() for x in neighbors_ents)/len(neighbors)}')
+                print(f'target ratio {sum(str(x).startswith(target_prefix) and str(x)[len(target_prefix):].isdigit() for x in after_ents)/s_num} and count {sum(str(x).startswith(target_prefix) and str(x)[len(target_prefix):].isdigit() for x in after_ents)}')
+                print(f'blank count {sum(str(x).startswith(blank_prefix) for x in after_ents)/s_num}')
+                print(f'person count {sum(str(x).startswith(person_prefix) and str(x)[len(person_prefix):].isdigit() for x in after_ents)/s_num}')
+                print(f'aggregation count {sum(str(x).startswith(aggreg_prefix) and str(x)[len(aggreg_prefix):].isdigit() for x in after_ents)/s_num}')
+                print(f'physical count {sum(str(x).startswith(physical_prefix) and str(x)[len(physical_prefix):].isdigit() for x in after_ents)/s_num}')
+                print(f'GRAPES common with train {torch.isin(data.training[:,0].long(), torch.unique(after_nodes)).sum()} common with test {torch.isin(data.withheld[:,0].long(), torch.unique(after_nodes)).sum()}') 
+                print(f'Rand target ratio {sum(str(x).startswith(target_prefix) and str(x)[len(target_prefix):].isdigit() for x in after_ents_r)/s_num} and count {sum(str(x).startswith(target_prefix) and str(x)[len(target_prefix):].isdigit() for x in after_ents_r)}')
+                print(f'blank count rand {sum(str(x).startswith(blank_prefix) for x in after_ents_r)/s_num}')
+                print(f'person count rand {sum(str(x).startswith(person_prefix) and str(x)[len(person_prefix):].isdigit() for x in after_ents_r)/s_num}')
+                print(f'aggregation count rand {sum(str(x).startswith(aggreg_prefix) and str(x)[len(aggreg_prefix):].isdigit() for x in after_ents_r)/s_num}')
+                print(f'physical count rand {sum(str(x).startswith(physical_prefix) and str(x)[len(physical_prefix):].isdigit() for x in after_ents_r)/s_num}')
+                print(f'Rand common with train {torch.isin(data.training[:,0].long(), torch.unique(after_nodes_r)).sum()} common with test {torch.isin(data.withheld[:,0].long(), torch.unique(after_nodes_r)).sum()}') 
+                #if sum(str(x).startswith(target_prefix) and str(x)[len(target_prefix):].isdigit() for x in after_ents) == 0:
+                    #pdb.set_trace()
+                #print(f'after_nodes_ent GRAPES: {after_ents}')
+                #print(f'after_nodes_ent_random: {after_ents_r}')
             else:
                 after_nodes = batch_idx
 
-            # Testing how LDUN works within this setup
-
-            # A_row = slice_rows_tensor2(nore_A, previous_nodes)
-            # A_en_row = slice_rows_tensor2(A_en, previous_nodes)
-            # size = [len(previous_nodes), num_nodes]
-            # pi = calc_prob(A_row, size, 1, device)
-            # num_prev_nodes = len(previous_nodes)
-            # sum_pi = pi.sum()
-            # p = pi / sum_pi
-            # s_num = samp_num_list[d]
-            # if s_num > 0:
-            #     idx_local, nonzero_rels, global_idx, prob, rels_more = sel_idx_node(p, s_num, num_nodes, 1)
-            #     idx_list_per_rel = []
-            #     after_nodes = idx_local  # unique node idx
-
             # unique node idx with aggregation
-            after_nodes = torch.unique(torch.cat((after_nodes, batch_idx.to('cpu'))))
+            after_nodes = torch.unique(torch.cat((after_nodes, batch_idx.to('cpu')))) #[torch.randperm(len(batch_idx))[:int(len(batch_idx)/2)]].to('cpu'))))
             if pert:
                 after_nodes_pert = neighbors[torch.randperm(s_num)[:int(s_num * (1 - pert_ratio))]]
                 after_nodes_pert = torch.unique(torch.cat((after_nodes_pert, batch_idx.to('cpu'))))
@@ -863,8 +941,8 @@ def grapes_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, s
             cols = getAdjacencyNodeColumnIdx(after_nodes, num_nodes, 2*num_rels+1)
             col_ind.append(cols)
             # sample A
-            # A_en_sliced.append(slice_adj_col(A_en_row, col_ind, 2 * num_rels + 1, num_prev_nodes, sampler, after_nodes,
-            #                                  len(after_nodes), [], []).to(device))
+            #A_en_sliced.append(slice_adj_col(A_en_row, col_ind, 2 * num_rels + 1, num_prev_nodes, sampler, after_nodes,
+            #                                 len(after_nodes), [], []).to(device))
             A_en_sliced.append(slice_adj_row_col(A_en, previous_nodes, cols, len(previous_nodes), len(after_nodes), 'cl').to(device))
             # A_en_sliced.append(slice_adj_col(A_en_row, col_ind, 2 * num_rels + 1, num_prev_nodes, sampler, after_nodes,
             #                                  len(after_nodes), global_idx, prob).to(device))
@@ -1016,7 +1094,7 @@ def ladies_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, s
     return A_en_sliced, after_nodes_list, idx_per_rel_list, non_zero_rel_list, rels_more
 
 
-def ladies_norel_sampler(batch_idx, samp_num_list, num_nodes, num_rels, nore_A, A_en, depth, sampler, device):
+def ladies_norel_sampler(batch_idx, samp_num_list, num_nodes, num_rels, nore_A, A_en, depth, sampler, device, data):
     previous_nodes = batch_idx
     col_ind = []
     A_en_sliced = []
@@ -1026,6 +1104,7 @@ def ladies_norel_sampler(batch_idx, samp_num_list, num_nodes, num_rels, nore_A, 
 
     for d in range(depth):
         # row slice the adjacency by the batch nodes to find their neighbors
+        neighbors = get_neighbours_sparse(A_en, previous_nodes)
         A_row = slice_rows_tensor2(nore_A, previous_nodes)
         A_en_row = slice_rows_tensor2(A_en, previous_nodes)
         size = [len(previous_nodes), num_nodes]
@@ -1036,16 +1115,17 @@ def ladies_norel_sampler(batch_idx, samp_num_list, num_nodes, num_rels, nore_A, 
         # output the relations that appear in at least one neighbor
         sum_pi = pi.sum()
         p = pi/sum_pi
+        p = p[neighbors]
         s_num = samp_num_list[d]
         if s_num > 0:
             if sampler == 'LDRN' or sampler == 'LDUN':
                 # node sampling by ReWise: including all the relations of a node
                 # sample nodes given their probablity.
                 # output the local and global idx of the neighbors, the probability of the nodes sampled
-                idx_local, nonzero_rels, global_idx, prob, rels_more = sel_idx_node(p, s_num, num_nodes, 1)
+                idx_local, nonzero_rels, global_idx, prob, rels_more = sel_idx_node(p, s_num, len(neighbors), 1)
                 idx_list_per_rel = []
-            after_nodes = idx_local  # unique node idx
-
+            after_nodes = neighbors[idx_local]  # unique node idx
+            print("len after nodes:", torch.unique(torch.cat((after_nodes, batch_idx))).size())
         else:
             after_nodes = batch_idx
         # unique node idx with aggregation
@@ -1054,9 +1134,10 @@ def ladies_norel_sampler(batch_idx, samp_num_list, num_nodes, num_rels, nore_A, 
             cols = getAdjacencyNodeColumnIdx(after_nodes, num_nodes, 2*num_rels+1)
             col_ind.append(cols)
             # sample A
-            A_en_sliced.append(slice_adj_col(A_en_row, col_ind, 2*num_rels+1, num_prev_nodes, sampler, after_nodes,
-                                             len(after_nodes), global_idx, prob).to(device))
-
+            #import pdb;pdb.set_trace()
+            #A_en_sliced.append(slice_adj_col(A_en_row, col_ind, 2*num_rels+1, num_prev_nodes, sampler, after_nodes,
+            #                                 len(after_nodes), global_idx, prob).to(device))
+            A_en_sliced.append(slice_adj_row_col(A_en, previous_nodes, cols, len(previous_nodes), len(after_nodes), 'cl').to(device))
         previous_nodes = after_nodes
         after_nodes_list.append(after_nodes)
         idx_list_per_rel_dev = [i.to(device) for i in idx_list_per_rel]
@@ -1084,10 +1165,12 @@ def full_mini_sampler(batch_idx, num_nodes, num_rels, A_en, depth, device):
         cols = getAdjacencyNodeColumnIdx(after_nodes, num_nodes, 2 * num_rels + 1)
         row_ind.append(previous_nodes)
         col_ind.append(cols)
-        previous_nodes = after_nodes
+        #previous_nodes = after_nodes
         # sample A
         A_en_sliced.append(slice_adj_col(A_row, col_ind, 2*num_rels+1, num_prev_nodes, 'LDRN', after_nodes,
                                          len(after_nodes), [], []).to(device))
+        #A_en_sliced.append(slice_adj_row_col(A_en, previous_nodes, cols, len(previous_nodes), len(after_nodes), 'cl').to(device))
+        previous_nodes = after_nodes
         after_nodes_list.append(after_nodes)
 
     A_en_sliced.reverse()
@@ -1168,6 +1251,7 @@ def calc_prob(A, size, num_rels, device):
     indices = A._indices()
     ones = torch.ones((size[0], 1))
     vals_sq = torch.mul(vals, vals)
+    #pdb.set_trace()
     if device == 'cuda':
         values = torch.cuda.sparse.FloatTensor(indices, vals_sq, torch.Size(size))
     else:
@@ -1191,11 +1275,11 @@ def sel_idx_node(pp, s_num, num_nodes, num_rels): #TODO: vectorize?
     # get the nodes and relations that appear in the neighbourhood of the target nodes
     non_zero_node_idx = (pp.isnan() == False).nonzero(as_tuple=True)[0]
     non_zero_rels = torch.unique((non_zero_node_idx - non_zero_node_idx % num_nodes)/num_nodes)
-
+    #pdb.set_trace()
     filtered_p = pp[~pp.isnan()]
     r = len(filtered_p)//num_nodes
     p_2d = torch.reshape(filtered_p, (r, num_nodes))
-    print(torch.count_nonzero(p_2d, dim=1))
+    #print(torch.count_nonzero(p_2d, dim=1))
     # Turning LDRN to LARN
     # if torch.count_nonzero(p_2d, dim=1) > 0:
     #     p_2d[p_2d != 0.0] = 1 / torch.count_nonzero(p_2d, dim=1)
@@ -1204,6 +1288,7 @@ def sel_idx_node(pp, s_num, num_nodes, num_rels): #TODO: vectorize?
     s_n = torch.minimum(torch.mul(torch.ones(r), s_num), torch.count_nonzero(p_2d, dim=1))
     for ri in range(r):
         idx = p_2d[ri].multinomial(int(s_n[ri]), replacement=False)
+        print(f'ldun sampled probs mean {p_2d[ri][idx].mean()}, max {p_2d[ri][idx].max()}, min {p_2d[ri][idx].min()}')
         total_idx.append(idx)
         global_idx.append(idx+non_zero_rels[ri]*num_nodes)
         prob_list.append(p_2d[ri][idx])
@@ -1219,6 +1304,9 @@ def sel_idx_edge(pp, s_num, num_nodes, num_rels, nonzero_rels): #TODO: implement
     filtered_p = pp[~pp.isnan()]
     r = len(filtered_p)//num_nodes
     p_2d = torch.reshape(filtered_p, (r, num_nodes))
+    # Turning LDRN to LARN
+    if torch.count_nonzero(p_2d, dim=1) > 0:
+        p_2d[p_2d != 0.0] = 1 / torch.count_nonzero(p_2d, dim=1)
     print(torch.count_nonzero(p_2d, dim=1))
     # percentage of the rels that have more nonzero degree nodes than the sample size
     rels_more_s_num = sum(torch.count_nonzero(p_2d, dim=1) > s_num) / num_rels * 100
@@ -1506,3 +1594,20 @@ def plot_graph(batch_node_idx_s, data, after_nodes_list, batch_out_train, batch_
     edge_labels = nx.get_edge_attributes(graph, 'label')
     nx.draw_networkx_edge_labels(graph, pos, edge_labels=edge_labels, font_size=5, font_color='grey')
     plt.show()
+
+
+def analyze_subgraph(data, after_nodes_list, batch_idx):
+    mask0 = ~torch.isin(after_nodes_list[1], batch_idx)
+    mask1 = ~torch.isin(after_nodes_list[0], batch_idx)
+    sampled0 = after_nodes_list[1][mask0]
+    sampled1 = after_nodes_list[0][mask1]
+    sampled_r0 = {r: 0 for r in range(data.num_relations)}
+    for s, r, o in data.triples:
+        if s in batch_idx and o in sampled0:
+            sampled_r0[r.item()] += 1
+    sampled_r1 = {r: 0 for r in range(data.num_relations)}
+    for s, r, o in data.triples:
+        if s in sampled0 and o in sampled1:
+            sampled_r1[r.item()] += 1
+
+    return sampled_r0, sampled_r1
