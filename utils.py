@@ -634,15 +634,15 @@ def sample_neighborhoods_from_probs(logits, num_samples, test, current_e, start_
     assert k > 0
     #import pdb; pdb.set_trace()
     # shuffle logits
-    shuffle_idx = torch.randperm(logits.size(0))
-    logits = logits[shuffle_idx]
+    #shuffle_idx = torch.randperm(logits.size(0))
+    #logits = logits[shuffle_idx]
     #test = True
     b = Bernoulli(logits=logits.squeeze())
     # Gumbel-sort trick https://timvieira.github.io/blog/post/2014/08/01/gumbel-max-trick-and-weighted-reservoir-sampling/
-    gumbel = Gumbel(torch.tensor(0., device=logits.device), torch.tensor(0.01, device=logits.device))
+    gumbel = Gumbel(torch.tensor(0., device=logits.device), torch.tensor(1, device=logits.device))
     gumbel_noise = gumbel.sample((n,))
     if current_e < start_e:
-        perturbed_log_probs = b.probs.log() #+ gumbel_noise
+        perturbed_log_probs = b.probs.log() + gumbel_noise
     else:
         # decay = math.log(1 / 1e-6) / (end_e - start_e)
         # gumbel_noise = gumbel_noise * math.exp(-decay * (current_e - start_e + 1)) #* b.probs.log().std()
@@ -660,13 +660,18 @@ def sample_neighborhoods_from_probs(logits, num_samples, test, current_e, start_
         # samples = torch.arange(k)
         # samples = torch.sort(b.probs)[1][-k:].to('cpu')
     else:
-        samples = torch.topk(perturbed_log_probs, k=k, dim=0, sorted=False)[1].to('cpu')
-        #samples = b.probs.multinomial(k, replacement=False) 
+        samples = torch.topk(perturbed_log_probs, k=k, dim=0, sorted=False)[1].to('cpu') 
+        probs = torch.softmax(logits.squeeze(),dim=-1)
+        #samples = probs.multinomial(k, replacement=False) 
     #print("probs:", " ".join(f"{p:.5f}" for p in torch.sort(b.probs[samples], descending=True).values))
     #print("samples:", torch.sort(samples).values)
     #print(f'sampled probs mean {b.probs[samples].mean()}, max {b.probs[samples].max()}, min {b.probs[samples].min()}')
+    
+    mask = torch.zeros_like(logits.squeeze(), dtype=torch.float)
+    mask[samples] = 1 
+
     # shuffle back
-    samples = shuffle_idx[samples]
+    #samples = shuffle_idx[samples]
     #print("samples shuffled:", samples)
 
     print("shared between probs and perturbed:",
@@ -686,8 +691,8 @@ def sample_neighborhoods_from_probs(logits, num_samples, test, current_e, start_
         entropy[nan_ind] = 0.0
 
     std_entropy, mean_entropy = torch.std_mean(entropy)
-    mask = torch.zeros_like(logits.squeeze(), dtype=torch.float)
-    mask[samples] = 1
+    #mask = torch.zeros_like(logits.squeeze(), dtype=torch.float)
+    #mask[samples] = 1
 
     # neighbor_nodes = neighbor_nodes[mask.bool().cpu()]
 
@@ -699,7 +704,7 @@ def sample_neighborhoods_from_probs(logits, num_samples, test, current_e, start_
     if torch.isinf(b.log_prob(mask)).any():
         inf_ind = torch.isinf(b.log_prob(mask))
         b.log_prob(mask)[inf_ind] = -1e-9
-
+    
     return samples, b.log_prob(mask), stats_dict
 
 
@@ -846,12 +851,12 @@ def grapes_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, s
             A_row = slice_rows_tensor2(nore_A, previous_nodes)
             #cols_neighb = getAdjacencyNodeColumnIdx(neighbors, num_nodes, 2*num_rels+1)
             #A_row_col = slice_adj_row_col(nore_A, previous_nodes, cols_neighb, len(previous_nodes), len(neighbors), 'cl').to(device)
-            #A_en_row = slice_rows_tensor2(A_en, previous_nodes)
-            size = [len(previous_nodes), num_nodes]
+            A_en_row = slice_rows_tensor2(A_en, previous_nodes)
+            #size = [len(previous_nodes), num_nodes]
             pi = calc_prob(A_row, size, 1, device)
             num_prev_nodes = len(previous_nodes)
             sum_pi = pi.sum()
-            p = pi / pi.max() #sum_pi
+            p = pi / sum_pi
             p = p[neighbors]
             #import pdb;pdb.set_trace()
             ldun_logits = torch.logit(p.clamp(min=1e-6, max=1 - 1e-6))
@@ -865,15 +870,15 @@ def grapes_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, s
                 idx_local, nonzero_rels, global_idx, prob, rels_more = sel_idx_node(p, s_num, len(neighbors), 1)
                 idx_list_per_rel = []
                 after_nodes_l = neighbors[idx_local]  # unique node idx
-                print(f'num after nodes LDUN: {torch.unique(torch.cat((after_nodes_l, batch_idx))).size()}')
+                #print(f'num after nodes LDUN: {torch.unique(torch.cat((after_nodes_l, batch_idx))).size()}')
                 #print(f"LDUN after nodes: {torch.unique(after_nodes_l)}")
-                after_ents_l = [data.i2e[t][0] for t in after_nodes_l.tolist() if data.i2e[t][1] != 'http://kgbench.info/dt#base64Image']
-                print(f'target ratio {sum(str(x).startswith(target_prefix) and str(x)[len(target_prefix):].isdigit() for x in after_ents_l)/s_num} count {sum(str(x).startswith(target_prefix) and str(x)[len(target_prefix):].isdigit() for x in after_ents_l)}')
-                print(f'blank count {sum(str(x).startswith(blank_prefix) for x in after_ents_l)/s_num}')
-                print(f'person count {sum(str(x).startswith(person_prefix) and str(x)[len(person_prefix):].isdigit() for x in after_ents_l)/s_num}')
-                print(f'aggreg count {sum(str(x).startswith(aggreg_prefix) and str(x)[len(aggreg_prefix):].isdigit() for x in after_ents_l)/s_num}')
-                print(f'physical count {sum(str(x).startswith(physical_prefix) and str(x)[len(physical_prefix):].isdigit() for x in after_ents_l)/s_num}')
-                print(f'LDUN common with train {torch.isin(data.training[:,0].long(), torch.unique(after_nodes_l)).sum()} common with test {torch.isin(data.withheld[:,0].long(), torch.unique(after_nodes_l)).sum()}') 
+                #after_ents_l = [data.i2e[t][0] for t in after_nodes_l.tolist() if data.i2e[t][1] != 'http://kgbench.info/dt#base64Image']
+                #print(f'target ratio {sum(str(x).startswith(target_prefix) and str(x)[len(target_prefix):].isdigit() for x in after_ents_l)/s_num} count {sum(str(x).startswith(target_prefix) and str(x)[len(target_prefix):].isdigit() for x in after_ents_l)}')
+                #print(f'blank count {sum(str(x).startswith(blank_prefix) for x in after_ents_l)/s_num}')
+                #print(f'person count {sum(str(x).startswith(person_prefix) and str(x)[len(person_prefix):].isdigit() for x in after_ents_l)/s_num}')
+                #print(f'aggreg count {sum(str(x).startswith(aggreg_prefix) and str(x)[len(aggreg_prefix):].isdigit() for x in after_ents_l)/s_num}')
+                #print(f'physical count {sum(str(x).startswith(physical_prefix) and str(x)[len(physical_prefix):].isdigit() for x in after_ents_l)/s_num}')
+                #print(f'LDUN common with train {torch.isin(data.training[:,0].long(), torch.unique(after_nodes_l)).sum()} common with test {torch.isin(data.withheld[:,0].long(), torch.unique(after_nodes_l)).sum()}') 
                 #print(f'after_nodes_ent LDUN: {after_ents_l}')
 
             # calculate the probability of sampling each neighbor in each relation
@@ -882,11 +887,11 @@ def grapes_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, s
             #node_logits = node_logits[mask]
             s_num = samp_num_list[d]
             node_logits_l = node_logits * 1e-4 + ldun_logits.to(device) 
-            print(f'GFN logits mean: {node_logits.mean()}, LDUN logits: {ldun_logits.mean()}')
+            #print(f'GFN logits mean: {node_logits.mean()}, LDUN logits: {ldun_logits.mean()}')
             wandb.log({'GRAPES mean logits': node_logits.mean(), 'LDUN mean logits': ldun_logits.mean()})
             if s_num > 0:
                 idx_local, log_prob, statistics = sample_neighborhoods_from_probs(
-                    node_logits,
+                    node_logits_l,
                     s_num,
                     not(model_g.training),
                     current_e,
@@ -903,22 +908,22 @@ def grapes_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, s
                 #print(f'count {sum(str(x).startswith(prefix) and str(x)[len(prefix):].isdigit() for x in after_nodes)}')
                 #import pdb;pdb.set_trace()
                 #sampled_test = [t for t in torch.unique(after_nodes).tolist() if data.i2e[t][1] != 'http://kgbench.info/dt#base64Image']
-                after_ents = [data.i2e[t][0] for t in torch.unique(after_nodes).tolist() if data.i2e[t][1] != 'http://kgbench.info/dt#base64Image']
-                after_ents_r = [data.i2e[t][0] for t in torch.unique(after_nodes_r).tolist() if data.i2e[t][1] != 'http://kgbench.info/dt#base64Image']
-                neighbors_ents = [data.i2e[t][0] for t in torch.unique(neighbors).tolist() if data.i2e[t][1] != 'http://kgbench.info/dt#base64Image']
+                #after_ents = [data.i2e[t][0] for t in torch.unique(after_nodes).tolist() if data.i2e[t][1] != 'http://kgbench.info/dt#base64Image']
+                #after_ents_r = [data.i2e[t][0] for t in torch.unique(after_nodes_r).tolist() if data.i2e[t][1] != 'http://kgbench.info/dt#base64Image']
+                #neighbors_ents = [data.i2e[t][0] for t in torch.unique(neighbors).tolist() if data.i2e[t][1] != 'http://kgbench.info/dt#base64Image']
                 #print(f'neigbors count {sum(str(x).startswith(prefix) and str(x)[len(prefix):].isdigit() for x in neighbors_ents)/len(neighbors)}')
-                print(f'target ratio {sum(str(x).startswith(target_prefix) and str(x)[len(target_prefix):].isdigit() for x in after_ents)/s_num} and count {sum(str(x).startswith(target_prefix) and str(x)[len(target_prefix):].isdigit() for x in after_ents)}')
-                print(f'blank count {sum(str(x).startswith(blank_prefix) for x in after_ents)/s_num}')
-                print(f'person count {sum(str(x).startswith(person_prefix) and str(x)[len(person_prefix):].isdigit() for x in after_ents)/s_num}')
-                print(f'aggregation count {sum(str(x).startswith(aggreg_prefix) and str(x)[len(aggreg_prefix):].isdigit() for x in after_ents)/s_num}')
-                print(f'physical count {sum(str(x).startswith(physical_prefix) and str(x)[len(physical_prefix):].isdigit() for x in after_ents)/s_num}')
-                print(f'GRAPES common with train {torch.isin(data.training[:,0].long(), torch.unique(after_nodes)).sum()} common with test {torch.isin(data.withheld[:,0].long(), torch.unique(after_nodes)).sum()}') 
-                print(f'Rand target ratio {sum(str(x).startswith(target_prefix) and str(x)[len(target_prefix):].isdigit() for x in after_ents_r)/s_num} and count {sum(str(x).startswith(target_prefix) and str(x)[len(target_prefix):].isdigit() for x in after_ents_r)}')
-                print(f'blank count rand {sum(str(x).startswith(blank_prefix) for x in after_ents_r)/s_num}')
-                print(f'person count rand {sum(str(x).startswith(person_prefix) and str(x)[len(person_prefix):].isdigit() for x in after_ents_r)/s_num}')
-                print(f'aggregation count rand {sum(str(x).startswith(aggreg_prefix) and str(x)[len(aggreg_prefix):].isdigit() for x in after_ents_r)/s_num}')
-                print(f'physical count rand {sum(str(x).startswith(physical_prefix) and str(x)[len(physical_prefix):].isdigit() for x in after_ents_r)/s_num}')
-                print(f'Rand common with train {torch.isin(data.training[:,0].long(), torch.unique(after_nodes_r)).sum()} common with test {torch.isin(data.withheld[:,0].long(), torch.unique(after_nodes_r)).sum()}') 
+                #print(f'target ratio {sum(str(x).startswith(target_prefix) and str(x)[len(target_prefix):].isdigit() for x in after_ents)/s_num} and count {sum(str(x).startswith(target_prefix) and str(x)[len(target_prefix):].isdigit() for x in after_ents)}')
+                #print(f'blank count {sum(str(x).startswith(blank_prefix) for x in after_ents)/s_num}')
+                #print(f'person count {sum(str(x).startswith(person_prefix) and str(x)[len(person_prefix):].isdigit() for x in after_ents)/s_num}')
+                #print(f'aggregation count {sum(str(x).startswith(aggreg_prefix) and str(x)[len(aggreg_prefix):].isdigit() for x in after_ents)/s_num}')
+                #print(f'physical count {sum(str(x).startswith(physical_prefix) and str(x)[len(physical_prefix):].isdigit() for x in after_ents)/s_num}')
+                #print(f'GRAPES common with train {torch.isin(data.training[:,0].long(), torch.unique(after_nodes)).sum()} common with test {torch.isin(data.withheld[:,0].long(), torch.unique(after_nodes)).sum()}') 
+                #print(f'Rand target ratio {sum(str(x).startswith(target_prefix) and str(x)[len(target_prefix):].isdigit() for x in after_ents_r)/s_num} and count {sum(str(x).startswith(target_prefix) and str(x)[len(target_prefix):].isdigit() for x in after_ents_r)}')
+                #print(f'blank count rand {sum(str(x).startswith(blank_prefix) for x in after_ents_r)/s_num}')
+                #print(f'person count rand {sum(str(x).startswith(person_prefix) and str(x)[len(person_prefix):].isdigit() for x in after_ents_r)/s_num}')
+                #print(f'aggregation count rand {sum(str(x).startswith(aggreg_prefix) and str(x)[len(aggreg_prefix):].isdigit() for x in after_ents_r)/s_num}')
+                #print(f'physical count rand {sum(str(x).startswith(physical_prefix) and str(x)[len(physical_prefix):].isdigit() for x in after_ents_r)/s_num}')
+                #print(f'Rand common with train {torch.isin(data.training[:,0].long(), torch.unique(after_nodes_r)).sum()} common with test {torch.isin(data.withheld[:,0].long(), torch.unique(after_nodes_r)).sum()}') 
                 #if sum(str(x).startswith(target_prefix) and str(x)[len(target_prefix):].isdigit() for x in after_ents) == 0:
                     #pdb.set_trace()
                 #print(f'after_nodes_ent GRAPES: {after_ents}')

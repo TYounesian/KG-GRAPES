@@ -86,9 +86,9 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
             embed_X = extract_embeddings(data, feat_size)
         else:  # If RGCN
             embed_X = nn.Parameter(torch.FloatTensor(data.num_entities, feat_size), requires_grad=True)
-            #nn.init.xavier_uniform_(embed_X, gain=nn.init.calculate_gain('relu'))
-            nn.init.kaiming_normal_(embed_X, mode='fan_in')
-
+            nn.init.xavier_uniform_(embed_X, gain=nn.init.calculate_gain('relu'))
+            #nn.init.kaiming_normal_(embed_X, mode='fan_in')
+            #nn.init.normal_(embed_X)
         if batch_size > 0:
             model_c = MRGCN_Batch(n=data.num_entities, feat_size=feat_size, embed_size=embed_size,
                                   modality=modality,
@@ -137,13 +137,16 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
         #     os.makedirs(folder)
 
         # # shuffle
+        torch.manual_seed(42)
         shuffle_idx = torch.randperm(train_idx.size(0))
         train_idx = train_idx[shuffle_idx]
         y_train = y_train[shuffle_idx]
         sampled_r = [[], []]
+        cnt = 0
+        prev_test_loss = 0
         for epoch in range(0, num_epochs):
             samp_num_list = [samp0, samp0]
-            start_e = num_epochs #- 5
+            start_e = num_epochs - 2
             pert = False
             pert_ratio = 0.25
             loss_c = 0
@@ -206,7 +209,7 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
                     #sampled_r0, sampled_r1 = analyze_subgraph(data, after_nodes_list, batch_node_idx_s)
                     #print(f'1st hop sampled relations {sampled_r0}')
                     #print(f'2nd hop sampled relations {sampled_r1}')
-                    if epoch == 0 or epoch == int(num_epochs/2) or epoch == num_epochs - 1:
+                    if epoch == num_epochs - 1: #epoch == 0 or epoch == int(num_epochs/2)
                         sampled_r0, sampled_r1 = analyze_subgraph(data, after_nodes_list, batch_node_idx_s)
                         print(f'1st hop sampled relations {sampled_r0}')
                         print(f'2nd hop sampled relations {sampled_r1}')
@@ -246,7 +249,7 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
                     batch_loss_train += criterion(batch_out_train, batch_y_train_s)
                     if l2 != 0.0 and modality == 'no':
                         batch_loss_train += batch_loss_train + l2 * embed_X.pow(2).sum()
-
+                        
                     with torch.no_grad():
                         if multilabel:
                             y_pred = batch_out_train > 0
@@ -279,19 +282,19 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
                                         'out': batch_out_train, 'batch_y': batch_y_train_s}
                         torch.save(sampled_dict, file_path)
 
-                    batch_loss_train = loss_batch
+                    #batch_loss_train = loss_batch
                     batch_loss_train.backward()
                     optimizer_c.step()
                     if sampler == 'grapes':
                         optimizer_g.zero_grad()
-                        cost_gfn = batch_loss_train.detach()
+                        cost_gfn = batch_loss_train.detach() - (l2 * embed_X.pow(2).sum()).detach()
                         tot_log_prob = sum(t.sum() for sublist in log_probs for t in sublist)
                         # Trajectory Balance loss
-                        loss_g = (log_z + tot_log_prob + loss_coef * cost_gfn) ** 2
+                        batch_loss_g = (log_z + tot_log_prob + loss_coef * cost_gfn) ** 2
 
-                        loss_g.backward()
+                        batch_loss_g.backward()
                         optimizer_g.step()
-                        batch_loss_g = loss_g.item()
+                        #batch_loss_g = loss_g.item()
                     else:
                         batch_loss_g = 0.
                         tot_log_prob = 0.
@@ -456,6 +459,14 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
 
                 epoch_ts_loss = loss_test.detach()
                 epoch_ts_acc = acc_test
+                if epoch_ts_loss > prev_test_loss:
+                    cnt += 1
+                    prev_test_loss = epoch_ts_loss
+                else:
+                    cnt = 0
+                    prev_test_loss = 0
+                if cnt == 15:
+                    sys.exit()
 
                 print("Repeat", i, ", Epoch ", epoch, " final Test Accuracy: ", epoch_ts_acc,
                       "And Loss: ", epoch_ts_loss.item())
@@ -476,7 +487,7 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
                     test_idx = test_idx.cuda()
 
                 optimizer_c.zero_grad()
-                out_train = model_c(embed_X=embed_X)[train_idx, :]
+                out_train = model_c(embed_X=embed_X, device=device)[train_idx, :]
                 # Get initial weigh norms for each layer
                 if epoch == 0:
                     layer1_norm_e0 = torch.linalg.matrix_norm(
@@ -515,7 +526,7 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
                 with torch.no_grad():
                     model_c.eval()
 
-                out_test = model_c(embed_X=embed_X)[test_idx, :]
+                out_test = model_c(embed_X=embed_X, device=device)[test_idx, :]
 
                 loss_test = criterion(out_test, y_test)
                 with torch.no_grad():
