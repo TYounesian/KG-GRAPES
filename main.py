@@ -24,14 +24,14 @@ from datetime import datetime
 def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_epochs=50, modality='no',
        l2=5e-4, lr_c=0.01, lr_d=0, lr_g=0.01, loss_coef=1e4, log_z_init=0., use_indicators=True, prune=True, final=True,
        embed_size=16, bases=40, sampler='LDRN', depth=2, samp0=2048, self_loop_dropout=0, test_state='full',
-       testing=True, saving=False, repeat=5, lr_embed=0, log_wandb=False):
+       testing=True, saving=False, repeat=5, lr_embed=0, log_wandb=False, drp_w1=0.):
     config = {
         "project": project, "data_name": data_name, "batch_size": batch_size, "feat_size": feat_size,
         "num_epochs": num_epochs, "modality": modality, "l2": l2, "lr_c": lr_c, "lr_d": lr_d, "lr_g": lr_g,
         'loss_coef': loss_coef,
         "prune": prune, "final": final, "embed_size": embed_size, "bases": bases, "sampler": sampler, "depth": depth,
         "samp0": samp0, "self_loop_dropout": self_loop_dropout, "test_state": test_state, "testing": testing,
-        "saving": saving, "repeat": repeat, "lr_embed": lr_embed
+        "saving": saving, "repeat": repeat, "lr_embed": lr_embed, "drp_w1": drp_w1
     }
 
     wandb.init(project=project, entity='tyou', mode='online' if log_wandb else 'disabled', config=config, dir='wandb_logs')
@@ -218,7 +218,7 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
                     if epoch == num_epochs -1:
                         if batch_id == train_num_batches-1:
                             print(f'final sampled relations: {sampled_r}') 
-                    batch_out_train, nodes_in_rels = model_c(embed_X, adj_tr_sliced,
+                    batch_out_train, nodes_in_rels = model_c(embed_X, adj_tr_sliced, drp_w1,
                                                              after_nodes_list, idx_per_rel_list,
                                                              nonzero_rel_list, test_state, device)
                     if pert and epoch == num_epochs - 1:
@@ -247,9 +247,12 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
                                 pkl.dump(nodes_in_rels_sum, f)
                     optimizer_c.zero_grad()
                     batch_loss_train += criterion(batch_out_train, batch_y_train_s)
+                    if sampler == 'grapes':
+                        optimizer_g.zero_grad()
+                        cost_gfn = batch_loss_train.detach()
+
                     if l2 != 0.0 and modality == 'no':
-                        batch_loss_train += batch_loss_train + l2 * embed_X.pow(2).sum()
-                        
+                        batch_loss_train += l2 * embed_X.pow(2).sum() 
                     with torch.no_grad():
                         if multilabel:
                             y_pred = batch_out_train > 0
@@ -287,7 +290,7 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
                     optimizer_c.step()
                     if sampler == 'grapes':
                         optimizer_g.zero_grad()
-                        cost_gfn = batch_loss_train.detach() - (l2 * embed_X.pow(2).sum()).detach()
+                        #cost_gfn = batch_loss_train.detach() - (l2 * embed_X.pow(2).sum()).detach()
                         tot_log_prob = sum(t.sum() for sublist in log_probs for t in sublist)
                         # Trajectory Balance loss
                         batch_loss_g = (log_z + tot_log_prob + loss_coef * cost_gfn) ** 2
@@ -403,7 +406,7 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
                                                       False,
                                                       pert_ratio,
                                                       device)
-                        batch_out_test, _ = model_c(embed_X, adj_ts_sliced,
+                        batch_out_test, _ = model_c(embed_X, adj_ts_sliced, drp_w1,
                                                     after_nodes_list, idx_per_rel_list,
                                                     nonzero_rel_list, test_state, device)
 

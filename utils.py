@@ -851,8 +851,8 @@ def grapes_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, s
             A_row = slice_rows_tensor2(nore_A, previous_nodes)
             #cols_neighb = getAdjacencyNodeColumnIdx(neighbors, num_nodes, 2*num_rels+1)
             #A_row_col = slice_adj_row_col(nore_A, previous_nodes, cols_neighb, len(previous_nodes), len(neighbors), 'cl').to(device)
-            A_en_row = slice_rows_tensor2(A_en, previous_nodes)
-            #size = [len(previous_nodes), num_nodes]
+            #A_en_row = slice_rows_tensor2(A_en, previous_nodes)
+            size = [len(previous_nodes), num_nodes]
             pi = calc_prob(A_row, size, 1, device)
             num_prev_nodes = len(previous_nodes)
             sum_pi = pi.sum()
@@ -869,7 +869,7 @@ def grapes_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, s
             if s_num > 0:
                 idx_local, nonzero_rels, global_idx, prob, rels_more = sel_idx_node(p, s_num, len(neighbors), 1)
                 idx_list_per_rel = []
-                after_nodes_l = neighbors[idx_local]  # unique node idx
+                #after_nodes_l = neighbors[idx_local]  # unique node idx
                 #print(f'num after nodes LDUN: {torch.unique(torch.cat((after_nodes_l, batch_idx))).size()}')
                 #print(f"LDUN after nodes: {torch.unique(after_nodes_l)}")
                 #after_ents_l = [data.i2e[t][0] for t in after_nodes_l.tolist() if data.i2e[t][1] != 'http://kgbench.info/dt#base64Image']
@@ -891,7 +891,7 @@ def grapes_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, s
             wandb.log({'GRAPES mean logits': node_logits.mean(), 'LDUN mean logits': ldun_logits.mean()})
             if s_num > 0:
                 idx_local, log_prob, statistics = sample_neighborhoods_from_probs(
-                    node_logits_l,
+                    node_logits,
                     s_num,
                     not(model_g.training),
                     current_e,

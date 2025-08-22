@@ -384,7 +384,7 @@ class LADIES_Mini_Batch_ERGCN(nn.Module):  # ergcn - rgcn with node embeddings
         self.bias1 = nn.Parameter(torch.FloatTensor(embed_size).zero_())
         self.bias2 = nn.Parameter(torch.FloatTensor(num_classes).zero_())
 
-    def forward(self, X_batch, A_en_sliced, test_state,
+    def forward(self, X_batch, A_en_sliced, test_state, drp_w1=0.,
                 idx_per_rel_list=None, nonzero_rel_list=None):
         one_adjacency = not(type(A_en_sliced) == list)
         if test_state == 'LDRN' or test_state == 'full-mini' or (self.training and (self.sampler == 'LDRN'
@@ -414,11 +414,11 @@ class LADIES_Mini_Batch_ERGCN(nn.Module):  # ergcn - rgcn with node embeddings
 
             else:
                 w = torch.einsum('rb, beh -> reh', self.comp1, self.bases1)
-                xw_dp1 = torch.einsum('ne, reh -> rnh', X_batch.float(), w.float()).contiguous()
+                xw_dp1 = torch.einsum('ne, reh -> rnh', X_batch, w).contiguous()
 
             h1_dp1 = torch.mm(A_0.float(), (xw_dp1.view(self.num_rels * X_batch.size(0), e).float()))
             h1 = F.relu(h1_dp1 + self.bias1)
-
+            h1 = F.dropout(h1, p=drp_w1, training=self.training)
             # Layer 2
             if self.bases2 is None:
                 w = self.w2
@@ -511,7 +511,7 @@ class LADIES_Mini_Batch_ERGCN(nn.Module):  # ergcn - rgcn with node embeddings
             h2 = torch.einsum('nh, rhc -> rnc', h1, w).contiguous()
             h2 = h2.view(self.num_rels * n1, c)
             h2 = torch.mm(A_en_sliced, h2)
-            print("---------hi---------")
+
             return h2 + self.bias2
 
     def penalty(self, p=2):
