@@ -218,13 +218,13 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
                     if epoch == num_epochs -1:
                         if batch_id == train_num_batches-1:
                             print(f'final sampled relations: {sampled_r}') 
-                    batch_out_train, nodes_in_rels = model_c(embed_X, adj_tr_sliced, drp_w1,
+                    batch_out_train, nodes_in_rels = model_c(embed_X, adj_tr_sliced,
                                                              after_nodes_list, idx_per_rel_list,
-                                                             nonzero_rel_list, test_state, device)
+                                                             nonzero_rel_list, test_state, device, drp_w1)
                     if pert and epoch == num_epochs - 1:
                         batch_out_train_pert, _ = model_c(embed_X, adj_tr_pert,
                                                           after_nodes_list_pert, idx_per_rel_list,
-                                                          nonzero_rel_list, test_state, device)
+                                                          nonzero_rel_list, test_state, device, drp_w1)
                         with torch.no_grad():
                             batch_acc_train_pert = (batch_out_train_pert.argmax(
                                 dim=1) == batch_y_train_s).sum().item() / len(batch_y_train_s) * 100
@@ -406,7 +406,7 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
                                                       False,
                                                       pert_ratio,
                                                       device)
-                        batch_out_test, _ = model_c(embed_X, adj_ts_sliced, drp_w1,
+                        batch_out_test, _ = model_c(embed_X, adj_ts_sliced,
                                                     after_nodes_list, idx_per_rel_list,
                                                     nonzero_rel_list, test_state, device)
 

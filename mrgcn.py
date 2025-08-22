@@ -17,13 +17,13 @@ class MRGCN_Batch(nn.Module):
         self.num_rels = num_rels
         self.batch_rgcn = LADIES_Mini_Batch_ERGCN(n, feat_size, embed_size, num_classes, num_rels, num_bases, sampler)
 
-    def forward(self, embed_X, A_en_sliced, after_nodes_list, idx_per_rel_list, nonzero_rel_list, test_state, device):
+    def forward(self, embed_X, A_en_sliced, after_nodes_list, idx_per_rel_list, nonzero_rel_list, test_state, device, drp_w1=0.):
         out, nodes_in_rels, = self.sampler_forward(embed_X, A_en_sliced, after_nodes_list,
-                                                    idx_per_rel_list, nonzero_rel_list, test_state, device)
+                                                    idx_per_rel_list, nonzero_rel_list, test_state, device, drp_w1)
         return out, nodes_in_rels
 
     def sampler_forward(self, embed_X, A_en_sliced, after_nodes, idx_per_rel_list,
-                        nonzero_rel_list, test_state, device):
+                        nonzero_rel_list, test_state, device, drp_w1=0.):
         if type(after_nodes) == list:
             if len(after_nodes) > 0:
                 em_X = embed_X[after_nodes[0]]
@@ -38,9 +38,9 @@ class MRGCN_Batch(nn.Module):
         self.batch_rgcn.to(device)
 
         if self.sampler == "LDRN" or self.sampler == "LDRE" or self.sampler =='LDUN':
-            out = self.batch_rgcn(em_X_dev, A_en_sliced, test_state, idx_per_rel_list, nonzero_rel_list)
+            out = self.batch_rgcn(em_X_dev, A_en_sliced, test_state, idx_per_rel_list, nonzero_rel_list, drp_w1)
         else:
-            out = self.batch_rgcn(em_X_dev, A_en_sliced, test_state, [], [])
+            out = self.batch_rgcn(em_X_dev, A_en_sliced, test_state, [], [], drp_w1)
 
         return out, 0
 

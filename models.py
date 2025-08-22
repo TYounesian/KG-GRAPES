@@ -384,8 +384,8 @@ class LADIES_Mini_Batch_ERGCN(nn.Module):  # ergcn - rgcn with node embeddings
         self.bias1 = nn.Parameter(torch.FloatTensor(embed_size).zero_())
         self.bias2 = nn.Parameter(torch.FloatTensor(num_classes).zero_())
 
-    def forward(self, X_batch, A_en_sliced, test_state, drp_w1=0.,
-                idx_per_rel_list=None, nonzero_rel_list=None):
+    def forward(self, X_batch, A_en_sliced, test_state,
+                idx_per_rel_list=None, nonzero_rel_list=None, drp_w1=0.):
         one_adjacency = not(type(A_en_sliced) == list)
         if test_state == 'LDRN' or test_state == 'full-mini' or (self.training and (self.sampler == 'LDRN'
                                                                 or self.sampler == 'LDUN'
