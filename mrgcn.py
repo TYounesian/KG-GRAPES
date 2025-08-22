@@ -58,8 +58,8 @@ class MRGCN_Full(nn.Module):
 
         self.rgcn = RGCN2(n, edges, feat_size, embed_size, num_classes, num_rels, num_bases, self_loop_dropout)
 
-    def forward(self, embed_X):
+    def forward(self, embed_X, device):
         # Sum up the init embeddings with cnn embeddings
-        out = self.rgcn(embed_X)  # A is calculated inside
+        out = self.rgcn(embed_X.to(device))  # A is calculated inside
 
         return out
