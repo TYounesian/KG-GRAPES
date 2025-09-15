@@ -218,7 +218,8 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
                     if epoch == num_epochs -1:
                         if batch_id == train_num_batches-1:
                             print(f'final sampled relations: {sampled_r}') 
-                    batch_out_train, nodes_in_rels = model_c(embed_X, adj_tr_sliced,
+                    em = embed_X[after_nodes_list[0]]
+                    batch_out_train, nodes_in_rels = model_c(em, adj_tr_sliced,
                                                              after_nodes_list, idx_per_rel_list,
                                                              nonzero_rel_list, test_state, device, drp_w1)
                     if pert and epoch == num_epochs - 1:
@@ -250,9 +251,9 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
                     if sampler == 'grapes':
                         optimizer_g.zero_grad()
                         cost_gfn = batch_loss_train.detach()
-
+                    
                     if l2 != 0.0 and modality == 'no':
-                        batch_loss_train += l2 * embed_X.pow(2).sum() 
+                        batch_loss_train += l2 * em.pow(2).sum() # model_c.batch_rgcn.penalty() #em.pow(2).sum()
                     with torch.no_grad():
                         if multilabel:
                             y_pred = batch_out_train > 0
@@ -286,22 +287,27 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
                         torch.save(sampled_dict, file_path)
 
                     #batch_loss_train = loss_batch
-                    batch_loss_train.backward()
-                    optimizer_c.step()
+                    #batch_loss_train.backward()
+                    #optimizer_c.step()
                     if sampler == 'grapes':
                         optimizer_g.zero_grad()
                         #cost_gfn = batch_loss_train.detach() - (l2 * embed_X.pow(2).sum()).detach()
                         tot_log_prob = sum(t.sum() for sublist in log_probs for t in sublist)
                         # Trajectory Balance loss
                         batch_loss_g = (log_z + tot_log_prob + loss_coef * cost_gfn) ** 2
-
-                        batch_loss_g.backward()
+                        
+                        loss = batch_loss_train + batch_loss_g
+                        loss.backward()
+                        optimizer_c.step()
+                        #batch_loss_g.backward()
                         optimizer_g.step()
                         #batch_loss_g = loss_g.item()
                     else:
                         batch_loss_g = 0.
                         tot_log_prob = 0.
                         cost_gfn = 0.
+                        batch_loss_train.backward()
+                        optimizer_c.step()
 
                     wandb.log({'epoch': epoch,
                                'train_batch_loss_c': batch_loss_train,
@@ -453,8 +459,9 @@ def go(project="kg-g", data_name='amplus', batch_size=2048, feat_size=16, num_ep
                     loss_test = loss / test_num_batches
                     acc_test = acc / test_num_batches
                 elif test_state == 'full' and testing:
-                    out, _ = model_c(embed_X, adj_ts.to(device), [], [], [], test_state, device=device)
-                    out_test = out[test_idx, :]
+                    with torch.no_grad():
+                        out, _ = model_c(embed_X, adj_ts.to(device), [], [], [], test_state, device=device)
+                        out_test = out[test_idx, :]
 
                     loss_test = criterion(out_test, y_test)
                     with torch.no_grad():
