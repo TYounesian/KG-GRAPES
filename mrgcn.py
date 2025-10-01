@@ -24,13 +24,13 @@ class MRGCN_Batch(nn.Module):
 
     def sampler_forward(self, embed_X, A_en_sliced, after_nodes, idx_per_rel_list,
                         nonzero_rel_list, test_state, device, drp_w1=0.):
-        if type(after_nodes) == list:
-            if len(after_nodes) > 0:
-                em_X = embed_X[after_nodes[0]]
-            else:
-                em_X = embed_X
-        else:
-            em_X = embed_X
+        #if type(after_nodes) == list:
+         #   if len(after_nodes) > 0:
+          #      em_X = embed_X[after_nodes[0]]
+           # else:
+            #    em_X = embed_X
+        #else:
+        em_X = embed_X
 
         em_X_dev = None if em_X is None else em_X.to(device)
         # A_en_sliced = [i.to(device) for i in A_en_sliced]
