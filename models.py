@@ -389,6 +389,7 @@ class LADIES_Mini_Batch_ERGCN(nn.Module):  # ergcn - rgcn with node embeddings
         one_adjacency = not(type(A_en_sliced) == list)
         if test_state == 'LDRN' or test_state == 'full-mini' or (self.training and (self.sampler == 'LDRN'
                                                                 or self.sampler == 'LDUN'
+                                                                or self.sampler == 'LAUN'
                                                                 or self.sampler == 'LDRE'
                                                                 or self.sampler == 'IARN'
                                                                 or self.sampler == 'IDRN'

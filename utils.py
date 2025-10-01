@@ -524,6 +524,23 @@ def sampler_func(sampler, batch_id, num_nodes, num_rels, horizontal_en_A_tr, nor
         log_z = 0.
         A_en_sliced_pert = []
         after_nodes_list_pert = []
+    elif sampler == 'LAUN':
+        A_en_sliced, after_nodes_list = random_sampler_layerwise_norel(batch_id,
+                                                                       samp_num_list,
+                                                                       num_nodes,
+                                                                       num_rels,
+                                                                       norel_A_tr,
+                                                                       horizontal_en_A_tr,
+                                                                       depth,
+                                                                       device)
+        rels_more = 0
+        idx_per_rel_list = []
+        nonzero_rel_list = []
+        log_probs = 0.
+        log_z = 0.
+        statistics = []
+        A_en_sliced_pert = []
+        after_nodes_list_pert = []
     elif sampler == 'IDRN':
         A_en_sliced, after_nodes_list, rels_more = fastgcn_plus_sampler(batch_id, samp_num_list, num_nodes,
                                                                         num_rels,
@@ -561,7 +578,7 @@ def adj_r_creator(edges, self_loop_dropout, num_nodes, num_rels, sampler):
     hor_en_adj_ts = torch.sparse.FloatTensor(indices=hor_en_ind_ts.t(), values=vals_en_ts, size=hor_en_size_ts)
     norel_A_tr = []
     norel_A_ts = []
-    if sampler == 'LDUN' or sampler == 'grapes':
+    if sampler == 'LDUN' or sampler == 'LAUN' or sampler == 'grapes':
         edges_en_self = enrich_self(edges, num_nodes, num_rels)
         norel_ind_tr, norel_size_tr = adj_norel(edges_en_tr, num_nodes)
 
@@ -708,34 +725,26 @@ def sample_neighborhoods_from_probs(logits, num_samples, test, current_e, start_
     return samples, b.log_prob(mask), stats_dict
 
 
-def random_sampler_layerwise(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, device):
+def random_sampler_layerwise_norel(batch_idx, samp_num_list, num_nodes, num_rels, norel_A, A_en, depth, device):
     previous_nodes = batch_idx
     col_ind = []
     A_en_sliced = []
     after_nodes_list = []
 
     for d in range(depth):
-        A_row = slice_rows_tensor2(A_en, previous_nodes)
-        size = [len(previous_nodes), num_nodes * num_rels]
-        pi = calc_prob(A_row, size, num_rels, device)
-        num_prev_nodes = len(previous_nodes)
-        p, nonzero_rels = sum_prob_per_rel(pi, num_nodes, num_rels)
+        neighbors = get_neighbours_sparse(A_en, previous_nodes)
         s_num = samp_num_list[d]
         if s_num > 0:
-            start = time.time()
-            idx_local = rand_sel_idx(p, s_num, num_nodes, num_rels)
-            print(f'4 ({time.time() - start:.4}s).')
-            after_nodes = idx_local
+            after_nodes = neighbors[torch.randperm(len(neighbors))[:2048]]
         else:
             after_nodes = batch_idx
-        after_nodes = torch.unique(torch.cat((after_nodes, previous_nodes.to('cpu')))).to(device=device)
-        cols = getAdjacencyNodeColumnIdx(after_nodes, num_nodes, num_rels)
+        after_nodes = torch.unique(torch.cat((after_nodes, previous_nodes.to('cpu'))))
+        cols = getAdjacencyNodeColumnIdx(after_nodes, num_nodes, 2*num_rels+1)
         col_ind.append(cols)
-        previous_nodes = after_nodes
-        # sample A
-        A_en_sliced.append(slice_adj_col(A_row, col_ind, num_rels, num_prev_nodes, 'IARN', after_nodes,
-                                         len(after_nodes), [], []))
+        A_en_sliced.append(
+            slice_adj_row_col(A_en, previous_nodes, cols, len(previous_nodes), len(after_nodes), 'cl').to(device))
         after_nodes_list.append(after_nodes)
+        previous_nodes = after_nodes
 
     A_en_sliced.reverse()
     after_nodes_list.reverse()
@@ -1099,7 +1108,7 @@ def ladies_sampler(batch_idx, samp_num_list, num_nodes, num_rels, A_en, depth, s
     return A_en_sliced, after_nodes_list, idx_per_rel_list, non_zero_rel_list, rels_more
 
 
-def ladies_norel_sampler(batch_idx, samp_num_list, num_nodes, num_rels, nore_A, A_en, depth, sampler, device, data):
+def ladies_norel_sampler(batch_idx, samp_num_list, num_nodes, num_rels, norel_A, A_en, depth, sampler, device, data):
     previous_nodes = batch_idx
     col_ind = []
     A_en_sliced = []
@@ -1110,12 +1119,10 @@ def ladies_norel_sampler(batch_idx, samp_num_list, num_nodes, num_rels, nore_A, 
     for d in range(depth):
         # row slice the adjacency by the batch nodes to find their neighbors
         neighbors = get_neighbours_sparse(A_en, previous_nodes)
-        A_row = slice_rows_tensor2(nore_A, previous_nodes)
-        A_en_row = slice_rows_tensor2(A_en, previous_nodes)
+        A_row = slice_rows_tensor2(norel_A, previous_nodes)
         size = [len(previous_nodes), num_nodes]
         # calculate the importance of each neighbor
         pi = calc_prob(A_row, size, 1, device)
-        num_prev_nodes = len(previous_nodes)
         # calculate the probability of sampling each neighbor in each relation
         # output the relations that appear in at least one neighbor
         sum_pi = pi.sum()
